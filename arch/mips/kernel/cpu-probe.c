@@ -152,6 +152,17 @@ static inline void cpu_probe_vmbits(struct cpuinfo_mips *c)
 #endif
 }
 
+static inline void cpu_probe_pabits(struct cpuinfo_mips *c)
+{
+	unsigned int enlow;
+
+	write_c0_entrylo0((-1UL)>>2); /* skip RIXI bits */
+	back_to_back_c0_hazard();
+	enlow = read_c0_entrylo0();
+	if ((_MIPS_SZLONG - fls(enlow)) < ilog2(_PAGE_GLOBAL))
+		c->options2 |= MIPS_CPU_HIMEM;
+}
+
 static void __cpuinit set_isa(struct cpuinfo_mips *c, unsigned int isa)
 {
 	switch (isa) {
@@ -1267,6 +1278,7 @@ __cpuinit void cpu_probe(void)
 		c->srsets = 1;
 
 	cpu_probe_vmbits(c);
+	cpu_probe_pabits(c);
 
 #ifdef CONFIG_64BIT
 	if (cpu == 0)

@@ -648,7 +648,12 @@ static __cpuinit __maybe_unused void build_convert_pte_to_entrylo(u32 **p,
 								  unsigned int reg)
 {
 	if (cpu_has_rixi) {
-		UASM_i_ROTR(p, reg, reg, ilog2(_PAGE_GLOBAL));
+		if (!cpu_has_himem)
+			UASM_i_ROTR(p, reg, reg, ilog2(_PAGE_GLOBAL));
+		else {
+			UASM_i_SRL(p, reg, reg, ilog2(_PAGE_NO_EXEC));
+			UASM_i_ROTR(p, reg, reg, ilog2(_PAGE_GLOBAL) - ilog2(_PAGE_NO_EXEC));
+		}
 	} else {
 #ifdef CONFIG_64BIT_PHYS_ADDR
 		uasm_i_dsrl_safe(p, reg, reg, ilog2(_PAGE_GLOBAL));
@@ -1070,9 +1075,17 @@ static void __cpuinit build_update_entries(u32 **p, unsigned int tmp,
 		uasm_i_ld(p, tmp, 0, ptep); /* get even pte */
 		uasm_i_ld(p, ptep, sizeof(pte_t), ptep); /* get odd pte */
 		if (cpu_has_rixi) {
-			UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL));
-			UASM_i_MTC0(p, tmp, C0_ENTRYLO0); /* load it */
-			UASM_i_ROTR(p, ptep, ptep, ilog2(_PAGE_GLOBAL));
+			if (!cpu_has_himem) {
+				UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL));
+				UASM_i_MTC0(p, tmp, C0_ENTRYLO0); /* load it */
+				UASM_i_ROTR(p, ptep, ptep, ilog2(_PAGE_GLOBAL));
+			} else {
+				UASM_i_SRL(p, tmp, tmp, ilog2(_PAGE_NO_EXEC));
+				UASM_i_SRL(p, ptep, ptep, ilog2(_PAGE_NO_EXEC));
+				UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL) - ilog2(_PAGE_NO_EXEC));
+				UASM_i_MTC0(p, tmp, C0_ENTRYLO0); /* load it */
+				UASM_i_ROTR(p, ptep, ptep, ilog2(_PAGE_GLOBAL) - ilog2(_PAGE_NO_EXEC));
+			}
 		} else {
 			uasm_i_dsrl_safe(p, tmp, tmp, ilog2(_PAGE_GLOBAL)); /* convert to entrylo0 */
 			UASM_i_MTC0(p, tmp, C0_ENTRYLO0); /* load it */
@@ -1095,11 +1108,20 @@ static void __cpuinit build_update_entries(u32 **p, unsigned int tmp,
 	if (r45k_bvahwbug())
 		build_tlb_probe_entry(p);
 	if (cpu_has_rixi) {
-		UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL));
+		if (!cpu_has_himem)
+			UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL));
+		else {
+			UASM_i_SRL(p, tmp, tmp, ilog2(_PAGE_NO_EXEC));
+			UASM_i_SRL(p, ptep, ptep, ilog2(_PAGE_NO_EXEC));
+			UASM_i_ROTR(p, tmp, tmp, ilog2(_PAGE_GLOBAL) - ilog2(_PAGE_NO_EXEC));
+		}
 		if (r4k_250MHZhwbug())
 			UASM_i_MTC0(p, 0, C0_ENTRYLO0);
 		UASM_i_MTC0(p, tmp, C0_ENTRYLO0); /* load it */
-		UASM_i_ROTR(p, ptep, ptep, ilog2(_PAGE_GLOBAL));
+		if (!cpu_has_himem)
+			UASM_i_ROTR(p, ptep, ptep, ilog2(_PAGE_GLOBAL));
+		else
+			UASM_i_ROTR(p, ptep, ptep, ilog2(_PAGE_GLOBAL) - ilog2(_PAGE_NO_EXEC));
 	} else {
 		UASM_i_SRL(p, tmp, tmp, ilog2(_PAGE_GLOBAL)); /* convert to entrylo0 */
 		if (r4k_250MHZhwbug())

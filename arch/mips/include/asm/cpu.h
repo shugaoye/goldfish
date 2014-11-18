@@ -350,6 +350,7 @@ enum cpu_type_enum {
  * CPU Option2 encodings
  */
 #define MIPS_CPU_MAAR           0x00000001      /* MAAR exists */
+#define MIPS_CPU_HIMEM          0x00000002 /* MIPS32: PA bits exceed PTE space */
 
 /*
  * CPU ASE encodings

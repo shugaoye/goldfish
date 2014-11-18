@@ -108,6 +108,9 @@
 #ifndef cpu_has_rixi
 #define cpu_has_rixi		(cpu_data[0].options & MIPS_CPU_RIXI)
 #endif
+#ifndef cpu_has_himem
+#define cpu_has_himem           (cpu_data[0].options2 & MIPS_CPU_HIMEM)
+#endif
 #ifndef cpu_has_rixi_except
 #define cpu_has_rixi_except     (cpu_data[0].options & MIPS_CPU_RIXI_EXCEPT)
 #endif
