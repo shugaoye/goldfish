@@ -52,7 +52,7 @@ do {									\
 #endif /* CONFIG_DEBUG_FS */
 
 extern int mips_dsemul(struct pt_regs *regs, mips_instruction ir,
-	unsigned long cpc);
+	unsigned long cpc, unsigned long bpc, unsigned long r31);
 extern int do_dsemulret(struct pt_regs *xcp);
 extern int fpu_emulator_cop1Handler(struct pt_regs *xcp,
 				    struct mips_fpu_struct *ctx, int has_fpu,

@@ -19,6 +19,8 @@
 
 #include <asm/vdso.h>
 #include <asm/uasm.h>
+#include <asm/cacheflush.h>
+#include <asm/tlbflush.h>
 
 /*
  * Including <asm/unistd.h> would give use the 64-bit syscall numbers ...
@@ -88,14 +90,18 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 
 	ret = install_special_mapping(mm, addr, PAGE_SIZE,
 				      VM_READ|VM_EXEC|
-				      VM_MAYREAD|VM_MAYWRITE|VM_MAYEXEC,
+				      VM_MAYREAD|VM_MAYEXEC,
 				      &vdso_page);
 
 	if (ret)
 		goto up_fail;
 
 	mm->context.vdso = (void *)addr;
+	/* if cache aliasing - use a different cache flush later */
+	if (cpu_has_rixi && (cpu_has_dc_aliases || cpu_has_ic_aliases))
+		mm->context.vdso_vma = find_vma(mm,addr);
 
+	mips_thread_vdso(current_thread_info());
 up_fail:
 	up_write(&mm->mmap_sem);
 	return ret;
@@ -106,4 +112,37 @@ const char *arch_vma_name(struct vm_area_struct *vma)
 	if (vma->vm_mm && vma->vm_start == (long)vma->vm_mm->context.vdso)
 		return "[vdso]";
 	return NULL;
+}
+
+void mips_thread_vdso(struct thread_info *ti)
+{
+	struct page *vdso;
+	unsigned long addr;
+
+	if (cpu_has_rixi && ti->task->mm && !ti->vdso_page) {
+		vdso = alloc_page(GFP_USER);
+		if (!vdso)
+			return;
+		ti->vdso_page = vdso;
+		ti->vdso_offset = PAGE_SIZE;
+		addr = (unsigned long)page_address(vdso);
+		copy_page((void *)addr, (void *)page_address(vdso_page));
+		if (!cpu_has_ic_fills_f_dc)
+			flush_data_cache_page(addr);
+		/* any vma in mmap is used, just to get ASIDs back from mm */
+		local_flush_tlb_page(ti->task->mm->mmap,addr);
+	}
+}
+
+void arch_release_thread_info(struct thread_info *info)
+{
+	if (info->vdso_page) {
+		if (info->task->mm) {
+			/* any vma in mmap is used, just to get ASIDs */
+			local_flush_tlb_page(info->task->mm->mmap,(unsigned long)page_address(info->vdso_page));
+			info->task->mm->context.vdso_asid[smp_processor_id()] = 0;
+		}
+		__free_page(info->vdso_page);
+		info->vdso_page = NULL;
+	}
 }

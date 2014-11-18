@@ -414,6 +414,48 @@ int wired_pop(void)
 	return(--current_wired);
 }
 
+int install_vdso_tlb(void)
+{
+	int tlbidx;
+	int cpu;
+	unsigned long flags;
+
+	if (!current_thread_info()->vdso_page)
+		return(0);
+
+	local_irq_save(flags);
+	cpu = smp_processor_id();
+	write_c0_entryhi(((unsigned long)current->mm->context.vdso & (PAGE_MASK << 1)) |
+			 cpu_asid(cpu, current->mm));
+
+	mtc0_tlbw_hazard();
+	tlb_probe();
+	tlb_probe_hazard();
+	tlbidx = read_c0_index();
+#if defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32)
+		write_c0_entrylo0(pte_val(pfn_pte(
+			page_to_pfn(current_thread_info()->vdso_page),
+			__pgprot(_page_cachable_default|_PAGE_VALID)))>>32);
+#else
+		write_c0_entrylo0(pte_to_entrylo(pte_val(pfn_pte(
+			page_to_pfn(current_thread_info()->vdso_page),
+			__pgprot(_page_cachable_default|_PAGE_VALID)))));
+#endif
+	write_c0_entrylo1(0);
+	mtc0_tlbw_hazard();
+	if (tlbidx < 0)
+		tlb_write_random();
+	else
+		tlb_write_indexed();
+	tlbw_use_hazard();
+
+	current->mm->context.vdso_asid[cpu] = cpu_asid(cpu, current->mm);
+	current->mm->context.vdso_page[cpu] = current_thread_info()->vdso_page;
+	local_irq_restore(flags);
+
+	return(1);
+}
+
 void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 		     unsigned long entryhi, unsigned long pagemask)
 {

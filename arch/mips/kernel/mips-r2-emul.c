@@ -282,6 +282,7 @@ static int jr_func(struct pt_regs *regs, u32 ir)
 	unsigned long epc;
 	unsigned long cpc;
 	unsigned long nepc;
+	unsigned long r31;
 	u32 nir;
 
 	if (delay_slot(regs))
@@ -289,6 +290,7 @@ static int jr_func(struct pt_regs *regs, u32 ir)
 	nepc = regs->cp0_epc;
 	regs->cp0_epc -= 4;
 	epc = regs->cp0_epc;
+	r31 = regs->regs[31];
 	err = __compute_return_epc(regs);
 	if (err < 0)
 		return(SIGEMT);
@@ -301,7 +303,7 @@ static int jr_func(struct pt_regs *regs, u32 ir)
 		/* Negative err means FPU instruction in BD-slot,
 		   Zero err means 'BD-slot emulation done' */
 		if ((err = mipsr6_emul(regs,nir)) > 0) {
-			err = mips_dsemul(regs, nir, cpc);
+			err = mips_dsemul(regs, nir, cpc, epc, r31);
 			if (err == SIGILL)
 				err = SIGEMT;
 			MIPS_R2_STATS(dsemul);
@@ -805,7 +807,7 @@ repeat:
 			}
 			if (nir) {  /* NOP is easy */
 				if ((err = mipsr6_emul(regs,nir)) > 0) {
-					err = mips_dsemul(regs, nir, cpc);
+					err = mips_dsemul(regs, nir, cpc, epc, r31);
 					if (err == SIGILL)
 						err = SIGEMT;
 					MIPS_R2_STATS(dsemul);
@@ -850,7 +852,7 @@ repeat:
 			}
 			if (nir) {  /* NOP is easy */
 				if ((err = mipsr6_emul(regs,nir)) > 0) {
-					err = mips_dsemul(regs, nir, cpc);
+					err = mips_dsemul(regs, nir, cpc, epc, r31);
 					if (err == SIGILL)
 						err = SIGEMT;
 					MIPS_R2_STATS(dsemul);
@@ -913,7 +915,7 @@ repeat:
 		}
 		if (nir) {  /* NOP is easy */
 			if ((err = mipsr6_emul(regs,nir)) > 0) {
-				err = mips_dsemul(regs, nir, cpc);
+				err = mips_dsemul(regs, nir, cpc, epc, r31);
 				if (err == SIGILL)
 					err = SIGEMT;
 				MIPS_R2_STATS(dsemul);

@@ -1063,10 +1063,14 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 {
 	mips_instruction ir;
 	unsigned long contpc = xcp->cp0_epc + dec_insn.pc_inc;
+	unsigned long r31;
+	unsigned long s_epc;
 	unsigned int cond;
 	int pc_inc;
 	int likely;
 
+	s_epc = xcp->cp0_epc;
+	r31 = xcp->regs[31];
 	/* XXX NEC Vr54xx bug workaround */
 	if (xcp->cp0_cause & CAUSEF_BD) {
 		if (dec_insn.micro_mips_mode) {
@@ -1399,7 +1403,7 @@ branch_cont:    {
 						 * Single step the non-CP1
 						 * instruction in the dslot.
 						 */
-						return mips_dsemul(xcp, ir, contpc);
+						return mips_dsemul(xcp, ir, contpc, s_epc, r31);
 					}
 				} else
 					contpc = (xcp->cp0_epc + (contpc << 2));
@@ -1432,7 +1436,7 @@ branch_cont:    {
 				 * Single step the non-cp1
 				 * instruction in the dslot
 				 */
-				return mips_dsemul(xcp, ir, contpc);
+				return mips_dsemul(xcp, ir, contpc, s_epc, r31);
 			} else {
 				/* branch not taken */
 				if (likely) {

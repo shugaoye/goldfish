@@ -538,6 +538,10 @@ static void handle_signal(unsigned long sig, siginfo_t *info,
 		regs->regs[0] = 0;		/* Don't deal with this again.	*/
 	}
 
+	/* adjust emulation stack if signal happens during emulation */
+	if (current_thread_info()->vdso_page)
+		vdso_epc_adjust(regs);
+
 	if (sig_uses_siginfo(ka))
 		ret = abi->setup_rt_frame(vdso + abi->rt_signal_return_offset,
 					  ka, regs, sig, oldset, info);

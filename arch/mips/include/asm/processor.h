@@ -40,7 +40,7 @@ extern unsigned int vced_count, vcei_count;
  * A special page (the vdso) is mapped into all processes at the very
  * top of the virtual memory space.
  */
-#define SPECIAL_PAGES_SIZE PAGE_SIZE
+#define SPECIAL_PAGES_SIZE (PAGE_SIZE * 2)
 
 #ifdef CONFIG_32BIT
 #ifdef CONFIG_KVM_GUEST
