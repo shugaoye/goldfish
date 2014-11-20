@@ -645,6 +645,8 @@
 #define MIPS_CONF4_TLBINV_FULL  (_ULCAST_(1) << 29)
 
 #define MIPS_CONF5_MRP          (_ULCAST_(1) << 3)
+#define MIPS_CONF5_FRE          (_ULCAST_(1) << 8)
+#define MIPS_CONF5_UFE          (_ULCAST_(1) << 9)
 #define MIPS_CONF5_EVA		(_ULCAST_(1) << 28)
 #define MIPS_CONF5_CV		(_ULCAST_(1) << 29)
 #define MIPS_CONF5_K		(_ULCAST_(1) << 30)
@@ -676,6 +678,7 @@
 /* additional bits in MIPS32/64 coprocessor 2 (FPU) */
 #define MIPS_FPIR_HAS2008       (_ULCAST_(1) << 23)
 #define MIPS_FPIR_FC            (_ULCAST_(1) << 24)
+#define MIPS_FPIR_FREP          (_ULCAST_(1) << 29)
 
 /*
  * Bits in the MIPS32 Memory Segmentation registers.

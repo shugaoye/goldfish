@@ -113,11 +113,7 @@ enum rt_op {
 	spimi_op, unused_rt_op_0x05, unused_rt_op_0x06, unused_rt_op_0x07,
 	tgei_op, tgeiu_op, tlti_op, tltiu_op,
 	teqi_op, unused_0x0d_rt_op, tnei_op, unused_0x0f_rt_op,
-#ifndef CONFIG_CPU_MIPSR6
 	bltzal_op, bgezal_op, bltzall_op, bgezall_op,
-#else
-	nal_op, bal_op, rt_op_0x12_op, rt_op_0x13_op,
-#endif
 	rt_op_0x14, rt_op_0x15, rt_op_0x16, rt_op_0x17,
 	rt_op_0x18, rt_op_0x19, rt_op_0x1a, rt_op_0x1b,
 	bposge32_op, rt_op_0x1d, rt_op_0x1e, rt_op_0x1f

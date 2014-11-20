@@ -1266,6 +1266,8 @@ __cpuinit void cpu_probe(void)
 				c->ases |= MIPS_ASE_MIPS3D;
 			if (c->fpu_id & MIPS_FPIR_HAS2008)
 				fpu_fcr31 = cpu_test_fpu_csr31(FPU_CSR_DEFAULT|FPU_CSR_MAC2008|FPU_CSR_ABS2008|FPU_CSR_NAN2008);
+			if (c->fpu_id & MIPS_FPIR_FREP)
+				c->options2 |= MIPS_CPU_FRE;
 		}
 	}
 

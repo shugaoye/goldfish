@@ -2037,14 +2037,15 @@ config MIPS_MT_FPAFF
 	default y
 	depends on MIPS_MT_SMP || MIPS_MT_SMTC
 
-config MIPS_INCOMPATIBLE_FPU_EMULATION
-	bool "Emulation of incompatible FPU"
+config MIPS_INCOMPATIBLE_ARCH_EMULATION
+	bool "Emulation of incompatible architecture"
 	default n
-	depends on !CPU_MIPS32_R2 && !CPU_MIPS64_R1 && !CPU_MIPS64_R2
+	depends on CPU_MIPSR6
 	help
 	  Emulation of 32x32bit or 32x64bit FPU ELFs on incompatible FPU.
 	  CP0_Status.FR bit controls switch between both models but
 	  some CPU may not have this capability.
+	  It also can emulate MIPS32/64 R2 architecture on MIPS R6.
 	  If unsure, leave N here.
 
 config MIPS_VPE_LOADER

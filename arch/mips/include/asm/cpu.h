@@ -351,6 +351,7 @@ enum cpu_type_enum {
  */
 #define MIPS_CPU_MAAR           0x00000001      /* MAAR exists */
 #define MIPS_CPU_HIMEM          0x00000002 /* MIPS32: PA bits exceed PTE space */
+#define MIPS_CPU_FRE            0x00000004 /* CPU has FRE support */
 
 /*
  * CPU ASE encodings

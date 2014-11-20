@@ -179,6 +179,5 @@ int do_dsemulret(struct pt_regs *xcp)
 
 	/* Set EPC to return to post-branch instruction */
 	xcp->cp0_epc = epc;
-
 	return 1;
 }

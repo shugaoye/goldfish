@@ -104,7 +104,7 @@ static const unsigned char mips_rm[4] = {
 
 #if __mips >= 4
 /* convert condition code register number to csr bit */
-static const unsigned int fpucondbit[8] = {
+const unsigned int fpucondbit[8] = {
 	FPU_CSR_COND0,
 	FPU_CSR_COND1,
 	FPU_CSR_COND2,
@@ -691,10 +691,9 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 {
 	union mips_instruction insn = (union mips_instruction)dec_insn.insn;
 	unsigned int bit = 0;
+	unsigned int fcr31;
 #ifdef CONFIG_CPU_MIPSR6
 	int reg;
-#else
-	unsigned int fcr31;
 #endif
 
 	switch (insn.i_format.opcode) {
@@ -704,9 +703,12 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			regs->regs[insn.r_format.rd] =
 				regs->cp0_epc + dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
-			/* Fall through */
-#ifndef CONFIG_CPU_MIPSR6
+			*contpc = regs->regs[insn.r_format.rs];
+			return 1;
 		case jr_op:
+#ifdef CONFIG_CPU_MIPSR6
+			if (!mipsr2_emulation)
+				break;
 #endif
 			*contpc = regs->regs[insn.r_format.rs];
 			return 1;
@@ -715,22 +717,20 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		break;
 	case bcond_op:
 		switch (insn.i_format.rt) {
-#ifdef CONFIG_CPU_MIPSR6
-		case nal_op:    /* MIPSR6: nal == bltzal $0 */
-			if (insn.i_format.rs)
-				break;
-#else
-		case bltzal_op:
 		case bltzall_op:
+#ifdef CONFIG_CPU_MIPSR6
+			if (!mipsr2_emulation)
+				break;
+#endif
+		case bltzal_op:
+#ifdef CONFIG_CPU_MIPSR6
+			/* MIPSR6: nal == bltzal $0 */
+			if (insn.i_format.rs && !mipsr2_emulation)
+				break;
 #endif
 			regs->regs[31] = regs->cp0_epc +
 				dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
-			/* Fall through */
-		case bltz_op:
-#ifndef CONFIG_CPU_MIPSR6
-		case bltzl_op:
-#endif
 			if ((long)regs->regs[insn.i_format.rs] < 0)
 				*contpc = regs->cp0_epc +
 					dec_insn.pc_inc +
@@ -741,22 +741,55 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 					dec_insn.next_pc_inc;
 			return 1;
 			break;
+
+		case bltzl_op:
 #ifdef CONFIG_CPU_MIPSR6
-		case bal_op:    /* MIPSR6: bal == bgezal $0 */
-			if (insn.i_format.rs)
+			if (!mipsr2_emulation)
 				break;
-#else
-		case bgezal_op:
+#endif
+		case bltz_op:
+			if ((long)regs->regs[insn.i_format.rs] < 0)
+				*contpc = regs->cp0_epc +
+					dec_insn.pc_inc +
+					(insn.i_format.simmediate << 2);
+			else
+				*contpc = regs->cp0_epc +
+					dec_insn.pc_inc +
+					dec_insn.next_pc_inc;
+			return 1;
+			break;
+
 		case bgezall_op:
+#ifdef CONFIG_CPU_MIPSR6
+			if (!mipsr2_emulation)
+				break;
+#endif
+		case bgezal_op:
+#ifdef CONFIG_CPU_MIPSR6
+			/* MIPSR6: bal == bgezal $0 */
+			if (insn.i_format.rs && !mipsr2_emulation)
+				break;
 #endif
 			regs->regs[31] = regs->cp0_epc +
 				dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
-			/* Fall through */
-		case bgez_op:
-#ifndef CONFIG_CPU_MIPSR6
+			if ((long)regs->regs[insn.i_format.rs] >= 0)
+				*contpc = regs->cp0_epc +
+					dec_insn.pc_inc +
+					(insn.i_format.simmediate << 2);
+			else
+				*contpc = regs->cp0_epc +
+					dec_insn.pc_inc +
+					dec_insn.next_pc_inc;
+			return 1;
+			break;
+
 		case bgezl_op:
+#ifdef CONFIG_CPU_MIPSR6
+			if (!mipsr2_emulation)
+				break;
 #endif
+		case bgez_op:
 			if ((long)regs->regs[insn.i_format.rs] >= 0)
 				*contpc = regs->cp0_epc +
 					dec_insn.pc_inc +
@@ -785,10 +818,12 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		*contpc ^= bit;
 		return 1;
 		break;
-	case beq_op:
-#ifndef CONFIG_CPU_MIPSR6
 	case beql_op:
+#ifdef CONFIG_CPU_MIPSR6
+		if (!mipsr2_emulation)
+			break;
 #endif
+	case beq_op:
 		if (regs->regs[insn.i_format.rs] ==
 		    regs->regs[insn.i_format.rt])
 			*contpc = regs->cp0_epc +
@@ -800,10 +835,12 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 				dec_insn.next_pc_inc;
 		return 1;
 		break;
-	case bne_op:
-#ifndef CONFIG_CPU_MIPSR6
 	case bnel_op:
+#ifdef CONFIG_CPU_MIPSR6
+		if (!mipsr2_emulation)
+			break;
 #endif
+	case bne_op:
 		if (regs->regs[insn.i_format.rs] !=
 		    regs->regs[insn.i_format.rt])
 			*contpc = regs->cp0_epc +
@@ -816,44 +853,28 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		return 1;
 		break;
 	case blez_op:
-#ifdef CONFIG_CPU_MIPSR6
-		/*
-		 *  Compact branches: blezalc, bgezalc, bgeuc
-		 */
-		if (insn.i_format.rt) {
-			if ((insn.i_format.rs == insn.i_format.rt) ||
-			    !insn.i_format.rs)   /* blezalc, bgezalc */
-				regs->regs[31] = regs->cp0_epc +
-					dec_insn.pc_inc;
-			*contpc = regs->cp0_epc +
-				dec_insn.pc_inc +
-				dec_insn.next_pc_inc;
-			return 1;
-			break;
-		}
-
-		if ((long)regs->regs[insn.i_format.rs] <= 0)
-			*contpc = regs->cp0_epc +
-				dec_insn.pc_inc +
-				(insn.i_format.simmediate << 2);
-		else
-			*contpc = regs->cp0_epc +
-				dec_insn.pc_inc +
-				dec_insn.next_pc_inc;
-		return 1;
-		break;
-#endif
 	case blezl_op:
 #ifdef CONFIG_CPU_MIPSR6
 		/*
-		 *  Compact branches: blezc, bgezc, bgec
+		 *  Compact branches: (blez:)  blezalc, bgezalc, bgeuc
+		 *  Compact branches: (blezl:) blezc, bgezc, bgec
 		 */
-		*contpc = regs->cp0_epc +
-			dec_insn.pc_inc +
-			dec_insn.next_pc_inc;
-		return 1;
-		break;
-#else
+		if (insn.i_format.rt) {
+			if (insn.i_format.opcode == blez_op)
+				if ((insn.i_format.rs == insn.i_format.rt) ||
+				    !insn.i_format.rs)   /* blezalc, bgezalc */
+					regs->regs[31] = regs->cp0_epc +
+						dec_insn.pc_inc;
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				dec_insn.next_pc_inc;
+			return 1;
+			break;
+		}
+
+		if ((insn.i_format.opcode != blez_op) && !mipsr2_emulation)
+			break;
+#endif
 		if ((long)regs->regs[insn.i_format.rs] <= 0)
 			*contpc = regs->cp0_epc +
 				dec_insn.pc_inc +
@@ -864,17 +885,20 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 				dec_insn.next_pc_inc;
 		return 1;
 		break;
-#endif
+
 	case bgtz_op:
+	case bgtzl_op:
 #ifdef CONFIG_CPU_MIPSR6
 		/*
-		 *  Compact branches: bltzalc, bgtzalc, bltuc
+		 *  Compact branches: (bgtz:)  bltzalc, bgtzalc, bltuc
+		 *  Compact branches: (bgtzl:) bltc, bltzc, bgtzc
 		 */
 		if (insn.i_format.rt) {
-			if ((insn.i_format.rs == insn.i_format.rt) ||
-			    !insn.i_format.rs)   /* bltzalc, bgtzalc */
-				regs->regs[31] = regs->cp0_epc +
-					dec_insn.pc_inc;
+			if (insn.i_format.opcode == bgtz_op)
+				if ((insn.i_format.rs == insn.i_format.rt) ||
+				    !insn.i_format.rs)   /* bltzalc, bgtzalc */
+					regs->regs[31] = regs->cp0_epc +
+						dec_insn.pc_inc;
 			*contpc = regs->cp0_epc +
 				dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
@@ -882,6 +906,9 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			break;
 		}
 
+		if ((insn.i_format.opcode != bgtz_op) && !mipsr2_emulation)
+			break;
+#endif
 		if ((long)regs->regs[insn.i_format.rs] > 0)
 			*contpc = regs->cp0_epc +
 				dec_insn.pc_inc +
@@ -892,29 +919,6 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 				dec_insn.next_pc_inc;
 		return 1;
 		break;
-#endif
-	case bgtzl_op:
-#ifdef CONFIG_CPU_MIPSR6
-		/*
-		 *  Compact branches: bltc, bltzc, bgtzc
-		 */
-		*contpc = regs->cp0_epc +
-			dec_insn.pc_inc +
-			dec_insn.next_pc_inc;
-		return 1;
-		break;
-#else
-		if ((long)regs->regs[insn.i_format.rs] > 0)
-			*contpc = regs->cp0_epc +
-				dec_insn.pc_inc +
-				(insn.i_format.simmediate << 2);
-		else
-			*contpc = regs->cp0_epc +
-				dec_insn.pc_inc +
-				dec_insn.next_pc_inc;
-		return 1;
-		break;
-#endif
 
 #ifdef CONFIG_CPU_MIPSR6
 	case cbcond0_op:
@@ -936,37 +940,39 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		return 1;
 #endif
 
-#ifdef CONFIG_CPU_MIPSR6
 	case cop1_op:
-		if ((insn.i_format.rs != bc1eqz_op) &&
-		    (insn.i_format.rs != bc1nez_op))
-			break;
+#ifdef CONFIG_CPU_MIPSR6
+		if ((insn.i_format.rs == bc1eqz_op) ||
+		    (insn.i_format.rs == bc1nez_op)) {
 
-		reg = insn.i_format.rt;
-		bit = 0;
-		switch (insn.i_format.rs) {
-		case bc1eqz_op:
-			if (current->thread.fpu.fpr[reg] == (__u64)0)
-				bit = 1;
-			break;
-		case bc1nez_op:
-			if (current->thread.fpu.fpr[reg] != (__u64)0)
-				bit = 1;
+			reg = insn.i_format.rt;
+			bit = 0;
+			switch (insn.i_format.rs) {
+			case bc1eqz_op:
+				if (current->thread.fpu.fpr[reg] == (__u64)0)
+					bit = 1;
+				break;
+			case bc1nez_op:
+				if (current->thread.fpu.fpr[reg] != (__u64)0)
+					bit = 1;
+				break;
+			}
+			if (bit)
+				*contpc = regs->cp0_epc +
+					dec_insn.pc_inc +
+					(insn.i_format.simmediate << 2);
+			else
+				*contpc = regs->cp0_epc +
+					dec_insn.pc_inc +
+					dec_insn.next_pc_inc;
+			return 1;
 			break;
 		}
-		if (bit)
-			*contpc = regs->cp0_epc +
-				dec_insn.pc_inc +
-				(insn.i_format.simmediate << 2);
-		else
-			*contpc = regs->cp0_epc +
-				dec_insn.pc_inc +
-				dec_insn.next_pc_inc;
-		return 1;
-		break;
-#else
+
+		if (!mipsr2_emulation)
+			break;
+#endif
 	case cop0_op:
-	case cop1_op:
 	case cop2_op:
 	case cop1x_op:
 		if (insn.i_format.rs == rs_bc_op) {
@@ -1008,7 +1014,6 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			}
 		}
 		break;
-#endif
 	}
 	return 0;
 }
@@ -1060,6 +1065,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 	unsigned long contpc = xcp->cp0_epc + dec_insn.pc_inc;
 	unsigned int cond;
 	int pc_inc;
+	int likely;
 
 	/* XXX NEC Vr54xx bug workaround */
 	if (xcp->cp0_cause & CAUSEF_BD) {
@@ -1309,6 +1315,8 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			if (xcp->cp0_cause & CAUSEF_BD)
 				return SIGILL;
 
+			likely = 0;
+
 			reg = MIPSInst_FT(ir);
 			cond = 0;
 			switch (MIPSInst_RS(ir)) {
@@ -1321,9 +1329,18 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 					cond = 1;
 				break;
 			}
-#else /* !CONFIG_CPU_MIPSR6 */
-		case rs_bc_op:{
-			int likely = 0;
+		}
+		goto branch_cont;
+
+#endif /* CONFIG_CPU_MIPSR6 */
+		case rs_bc_op:
+#ifdef CONFIG_CPU_MIPSR6
+		if (!mipsr2_emulation)
+			goto default_op;
+#endif
+
+		{
+			likely = 0;
 
 			if (xcp->cp0_cause & CAUSEF_BD)
 				return SIGILL;
@@ -1347,8 +1364,11 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 				/* thats an illegal instruction */
 				return SIGILL;
 			}
-#endif /* CONFIG_CPU_MIPSR6 */
+#ifdef CONFIG_CPU_MIPSR6
+		}
 
+branch_cont:    {
+#endif
 			xcp->cp0_cause |= CAUSEF_BD;
 			if (cond) {
 				/* branch taken: emulate dslot
@@ -1397,14 +1417,15 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 #endif
 					/* its one of ours */
 					goto emul;
-#ifndef CONFIG_CPU_MIPSR6
 #if __mips >= 4
 				case spec_op:
-					if (MIPSInst_FUNC(ir) == movc_op)
-						goto emul;
+#ifdef CONFIG_CPU_MIPSR6
+					if (mipsr2_emulation)
+#endif
+						if (MIPSInst_FUNC(ir) == movc_op)
+							   goto emul;
 					break;
 #endif
-#endif /* CONFIG_CPU_MIPSR6 */
 				}
 
 				/*
@@ -1412,9 +1433,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 				 * instruction in the dslot
 				 */
 				return mips_dsemul(xcp, ir, contpc);
-			}
-#ifndef CONFIG_CPU_MIPSR6
-			else {
+			} else {
 				/* branch not taken */
 				if (likely) {
 					/*
@@ -1429,11 +1448,13 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 					 */
 				}
 			}
-#endif /* CONFIG_CPU_MIPSR6 */
 			break;
 		}
 
 		default:
+#ifdef CONFIG_CPU_MIPSR6
+default_op:
+#endif
 			if (!(MIPSInst_RS(ir) & 0x10))
 				return SIGILL;
 			{
@@ -1455,9 +1476,12 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 	}
 #endif
 
-#ifndef CONFIG_CPU_MIPSR6
 #if __mips >= 4
 	case spec_op:
+#ifdef CONFIG_CPU_MIPSR6
+		if (!mipsr2_emulation)
+			return SIGILL;
+#endif
 		if (MIPSInst_FUNC(ir) != movc_op)
 			return SIGILL;
 		cond = fpucondbit[MIPSInst_RT(ir) >> 2];
@@ -1465,7 +1489,6 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			xcp->regs[MIPSInst_RD(ir)] =
 				xcp->regs[MIPSInst_RS(ir)];
 		break;
-#endif
 #endif
 
 	default:

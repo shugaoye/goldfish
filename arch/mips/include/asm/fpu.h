@@ -60,19 +60,37 @@ static inline int __own_fpu(void)
 	int ret = 0;
 
 #if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6) || defined(CONFIG_CPU_MIPS64)
+	u32 status;
+
 	if (test_thread_flag(TIF_32BIT_REGS)) {
-		change_c0_status(ST0_CU1|ST0_FR,ST0_CU1);
-		KSTK_STATUS(current) |= ST0_CU1;
-		KSTK_STATUS(current) &= ~ST0_FR;
+		status = change_c0_status(ST0_CU1|ST0_FR,ST0_CU1);
 		enable_fpu_hazard();
-		if (read_c0_status() & ST0_FR)
-		    ret = SIGFPE;
+		if (read_c0_status() & ST0_FR) {
+			if (cpu_has_fre) {
+				write_c0_config5(read_c0_config5() | MIPS_CONF5_FRE);
+				back_to_back_c0_hazard();
+				KSTK_STATUS(current) |= ST0_CU1|ST0_FR;
+			} else {
+				write_c0_status(status);
+				disable_fpu_hazard();
+				return(SIGFPE);
+			}
+		} else {
+			KSTK_STATUS(current) = (KSTK_STATUS(current) & ~ST0_FR) | ST0_CU1;
+		}
 	} else {
-		set_c0_status(ST0_CU1|ST0_FR);
-		KSTK_STATUS(current) |= ST0_CU1|ST0_FR;
+		status = set_c0_status(ST0_CU1|ST0_FR);
 		enable_fpu_hazard();
-		if (!(read_c0_status() & ST0_FR))
-		    ret = SIGFPE;
+		if (!(read_c0_status() & ST0_FR)) {
+			write_c0_status(status);
+			disable_fpu_hazard();
+			return(SIGFPE);
+		}
+		if (cpu_has_fre) {
+			write_c0_config5(read_c0_config5() | ~MIPS_CONF5_FRE);
+			back_to_back_c0_hazard();
+		}
+		KSTK_STATUS(current) |= ST0_CU1|ST0_FR;
 	}
 #else
 	if (!test_thread_flag(TIF_32BIT_REGS))

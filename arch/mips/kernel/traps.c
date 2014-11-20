@@ -777,7 +777,7 @@ asmlinkage void do_fpe(struct pt_regs *regs, unsigned long fcr31)
 	force_sig_info(SIGFPE, &info, current);
 }
 
-static void do_trap_or_bp(struct pt_regs *regs, unsigned int code,
+void do_trap_or_bp(struct pt_regs *regs, unsigned int code,
 	const char *str)
 {
 	siginfo_t info;
@@ -966,6 +966,24 @@ asmlinkage void do_ri(struct pt_regs *regs)
 	unsigned int opcode = 0;
 	int status = -1;
 
+#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+	if (mipsr2_emulation && likely(user_mode(regs))) {
+		if (likely(get_user(opcode, epc) >= 0)) {
+			status = mipsr2_decoder(regs, opcode);
+			switch (status) {
+			case SIGEMT:
+			case 0:
+				return;
+			case SIGILL:
+				break;
+			default:
+				process_fpemu_return(status, (void __user *)current->thread.cp0_baduaddr);
+				return;
+			}
+		}
+	}
+#endif
+
 	if (notify_die(DIE_RI, "RI Fault", regs, 0, regs_to_trapnr(regs), SIGILL)
 	    == NOTIFY_STOP)
 		return;
@@ -1153,12 +1171,14 @@ asmlinkage void do_cpu(struct pt_regs *regs)
 			status = own_fpu(1);
 		else {			/* First time FPU user.  */
 			status = init_fpu();
-#ifndef CONFIG_MIPS_INCOMPATIBLE_FPU_EMULATION
+#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+			if (status && !mipsr2_emulation) {
+#else
 			if (status) {
+#endif
 				force_sig(SIGFPE, current);
 				return;
 			}
-#endif
 
 			set_used_math();
 		}

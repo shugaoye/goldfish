@@ -156,6 +156,13 @@
 #ifndef cpu_has_maar
 #define cpu_has_maar            (cpu_data[0].options2 & MIPS_CPU_MAAR)
 #endif
+#ifndef cpu_has_fre
+#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+#define cpu_has_fre             (cpu_data[0].options2 & MIPS_CPU_FRE)
+#else
+#define cpu_has_fre             0
+#endif
+#endif /* cpu_has_fre */
 
 /*
  * I-Cache snoops remote store.	 This only matters on SMP.  Some multiprocessors
