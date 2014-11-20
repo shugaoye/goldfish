@@ -43,6 +43,7 @@
  *		       struct thread_info *next_ti, int usedfpu)
  */
 	.align	5
+	.set hardfloat
 	LEAF(resume)
 	mfc0	t1, CP0_STATUS
 	LONG_S	t1, THREAD_STATUS(a0)

@@ -1280,6 +1280,7 @@ do {									\
 	__asm__ __volatile__(						\
 	"	.set	push					\n"	\
 	"	.set	reorder					\n"	\
+	"       .set    hardfloat                               \n"     \
 	"	# gas fails to assemble cfc1 for some archs,	\n"	\
 	"	# like Octeon.					\n"	\
 	"	.set	mips1					\n"	\
@@ -1294,6 +1295,7 @@ do {									\
 	__asm__ __volatile__(						\
 	"	.set	push					\n"	\
 	"	.set	reorder					\n"	\
+	"       .set    hardfloat                               \n"     \
 	"	# gas fails to assemble cfc1 for some archs,	\n"	\
 	"	# like Octeon.					\n"	\
 	"	.set	mips1					\n"	\

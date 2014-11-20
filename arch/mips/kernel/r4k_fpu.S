@@ -35,6 +35,7 @@
 #else
 	.set	mips3
 #endif
+	.set    hardfloat
 
 LEAF(_save_fp_context)
 	cfc1	t1, fcr31
