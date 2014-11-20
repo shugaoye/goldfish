@@ -16,6 +16,8 @@
  * end of memory on some systems.  It's also a seriously bad idea on non
  * dma-coherent systems.
  */
+#ifndef CONFIG_CPU_MIPSR6
+
 #if defined(CONFIG_DMA_NONCOHERENT) || defined(CONFIG_MIPS_MALTA)
 #undef CONFIG_CPU_HAS_PREFETCH
 #endif
@@ -1522,3 +1524,5 @@ EXC(    sbe     t0, NBYTES-2(dst), .LTs_exc)
 	END(__csum_partial_copy_touser)
 
 #endif  /* CONFIG_EVA */
+
+#endif /* !CONFIG_CPU_MIPSR6 */

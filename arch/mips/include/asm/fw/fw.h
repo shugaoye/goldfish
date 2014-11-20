@@ -14,6 +14,7 @@ enum fw_memtypes {
 	fw_dontuse,
 	fw_code,
 	fw_free,
+	fw_inuse,
 };
 
 typedef struct {

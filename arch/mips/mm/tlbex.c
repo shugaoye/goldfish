@@ -512,7 +512,7 @@ static void __cpuinit build_tlb_write_entry(u32 **p, struct uasm_label **l,
 	case tlb_indexed: tlbw = uasm_i_tlbwi; break;
 	}
 
-	if (cpu_has_mips_r2) {
+	if (cpu_has_mips_r2 || cpu_has_mips_r6) {
 		/*
 		 * The architecture spec says an ehb is required here,
 		 * but a number of cores do not have the hazard and
@@ -982,7 +982,7 @@ build_get_pgde32(u32 **p, unsigned int tmp, unsigned int ptr)
 	uasm_i_mfc0(p, tmp, C0_BADVADDR); /* get faulting address */
 	uasm_i_lw(p, ptr, uasm_rel_lo(pgdc), ptr);
 
-	if (cpu_has_mips32r2) {
+	if (cpu_has_mips32r2 || cpu_has_mips32r6) {
 		uasm_i_ext(p, tmp, tmp, PGDIR_SHIFT, (32 - PGDIR_SHIFT));
 		uasm_i_ins(p, ptr, tmp, PGD_T_LOG2, (32 - PGDIR_SHIFT));
 		return;
@@ -1025,7 +1025,7 @@ static void __cpuinit build_adjust_context(u32 **p, unsigned int ctx)
 static void __cpuinit build_get_ptep(u32 **p, unsigned int tmp, unsigned int ptr)
 {
 #ifndef CONFIG_64BIT
-	if (cpu_has_mips_r2) {
+	if (cpu_has_mips_r2 || cpu_has_mips_r6) {
 		/* For MIPS32R2, PTE ptr offset is obtained from BadVAddr */
 		UASM_i_MFC0(p, tmp, C0_BADVADDR);
 		UASM_i_LW(p, ptr, 0, ptr);
@@ -1948,7 +1948,7 @@ static void __cpuinit build_r4000_tlb_load_handler(void)
 	if (m4kc_tlbp_war())
 		build_tlb_probe_entry(&p);
 
-	if (cpu_has_rixi) {
+	if (cpu_has_rixi && !cpu_has_rixi_except) {
 		/*
 		 * If the page is not _PAGE_VALID, RI or XI could not
 		 * have triggered it.  Skip the expensive test..
@@ -1963,6 +1963,19 @@ static void __cpuinit build_r4000_tlb_load_handler(void)
 		uasm_i_nop(&p);
 
 		uasm_i_tlbr(&p);
+
+		switch (current_cpu_type()) {
+		default:
+			if (cpu_has_mips_r2 || cpu_has_mips_r6) {
+				uasm_i_ehb(&p);
+
+		case CPU_CAVIUM_OCTEON:
+		case CPU_CAVIUM_OCTEON_PLUS:
+		case CPU_CAVIUM_OCTEON2:
+				break;
+			}
+		}
+
 		/* Examine  entrylo 0 or 1 based on ptr. */
 		if (use_bbit_insns()) {
 			uasm_i_bbit0(&p, wr.r2, ilog2(sizeof(pte_t)), 8);
@@ -2002,7 +2015,7 @@ static void __cpuinit build_r4000_tlb_load_handler(void)
 	build_pte_present(&p, &r, wr.r1, wr.r2, wr.r3, label_nopage_tlbl);
 	build_tlb_probe_entry(&p);
 
-	if (cpu_has_rixi) {
+	if (cpu_has_rixi && !cpu_has_rixi_except) {
 		/*
 		 * If the page is not _PAGE_VALID, RI or XI could not
 		 * have triggered it.  Skip the expensive test..
@@ -2017,6 +2030,19 @@ static void __cpuinit build_r4000_tlb_load_handler(void)
 		uasm_i_nop(&p);
 
 		uasm_i_tlbr(&p);
+
+		switch (current_cpu_type()) {
+		default:
+			if (cpu_has_mips_r2 || cpu_has_mips_r6) {
+				uasm_i_ehb(&p);
+
+		case CPU_CAVIUM_OCTEON:
+		case CPU_CAVIUM_OCTEON_PLUS:
+		case CPU_CAVIUM_OCTEON2:
+				break;
+			}
+		}
+
 		/* Examine  entrylo 0 or 1 based on ptr. */
 		if (use_bbit_insns()) {
 			uasm_i_bbit0(&p, wr.r2, ilog2(sizeof(pte_t)), 8);

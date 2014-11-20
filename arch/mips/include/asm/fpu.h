@@ -59,7 +59,7 @@ static inline int __own_fpu(void)
 {
 	int ret = 0;
 
-#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS64)
+#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6) || defined(CONFIG_CPU_MIPS64)
 	if (test_thread_flag(TIF_32BIT_REGS)) {
 		change_c0_status(ST0_CU1|ST0_FR,ST0_CU1);
 		KSTK_STATUS(current) |= ST0_CU1;

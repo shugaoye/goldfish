@@ -67,8 +67,8 @@ NESTED(except_vec3_generic, 0, sp)
  */
 NESTED(except_vec3_r4000, 0, sp)
 	.set	push
-	.set	mips3
-	.set	noat
+	.set    mips3
+	.set    noat
 	mfc0	k1, CP0_CAUSE
 	li	k0, 31<<2
 	andi	k1, k1, 0x7c
@@ -144,7 +144,7 @@ LEAF(__r4k_wait)
 	/* end of rollback region (the region size must be power of two) */
 1:
 	jr	ra
-	nop
+	 nop
 	.set	pop
 	END(__r4k_wait)
 
@@ -190,8 +190,11 @@ NESTED(handle_int, PT_SIZE, sp)
 #else
 	and	k0, ST0_IE
 	bnez	k0, 1f
-
+#ifdef CONFIG_CPU_MIPSR6
+	eretnc
+#else
 	eret
+#endif
 #endif
 1:
 	.set pop
@@ -394,8 +397,13 @@ NESTED(nmi_handler, PT_SIZE, sp)
 		and     k0, k0, k1
 		mtc0    k0, CP0_STATUS
 		ehb
+#ifdef CONFIG_CPU_MIPSR6
+	.set    mips64r6
+	eretnc
+#else
 	.set	mips3
 	eret
+#endif
 	.set	pop
 	END(nmi_handler)
 
@@ -583,14 +591,19 @@ isrdhwr:
 	ori	k1, _THREAD_MASK
 	xori	k1, _THREAD_MASK
 	LONG_L	v1, TI_TP_VALUE(k1)
+#ifdef CONFIG_CPU_MIPSR6
+	.set    mips64r6
+	eretnc
+#else
 	.set	mips3
 	eret
+#endif
 	.set	mips0
 #endif
 	.set	pop
 	END(handle_ri_rdhwr)
 
-#ifdef CONFIG_64BIT
+#if defined(CONFIG_64BIT) && !defined(CONFIG_CPU_MIPSR6)
 /* A temporary overflow handler used by check_daddi(). */
 
 	__INIT

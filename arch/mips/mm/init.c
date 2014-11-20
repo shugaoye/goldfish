@@ -43,6 +43,7 @@
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 #include <asm/fixmap.h>
+#include <asm/tlbmisc.h>
 
 /* Atomicity and interruptability */
 #ifdef CONFIG_MIPS_MT_SMTC
@@ -162,14 +163,16 @@ void *kmap_coherent(struct page *page, unsigned long addr)
 	else
 		tlb_write_indexed();
 #else
-	tlbidx = read_c0_wired();
+	tlbidx = read_c0_wired() & 0xffff;
 	write_c0_wired(tlbidx + 1);
 	write_c0_index(tlbidx);
 	mtc0_tlbw_hazard();
+	wired_push(vaddr & (PAGE_MASK << 1),entrylo,entrylo,PM_DEFAULT_MASK);
 	tlb_write_indexed();
 #endif
 	tlbw_use_hazard();
 	write_c0_entryhi(old_ctx);
+	mtc0_tlbw_hazard();
 	EXIT_CRITICAL(flags);
 
 	return (void*) vaddr;
@@ -187,16 +190,18 @@ void kunmap_coherent(void)
 
 	ENTER_CRITICAL(flags);
 	old_ctx = read_c0_entryhi();
-	wired = read_c0_wired() - 1;
+	wired = (read_c0_wired() & 0xffff) - 1;
 	write_c0_wired(wired);
 	write_c0_index(wired);
 	write_c0_entryhi(UNIQUE_ENTRYHI(wired));
 	write_c0_entrylo0(0);
 	write_c0_entrylo1(0);
 	mtc0_tlbw_hazard();
+	wired_pop();
 	tlb_write_indexed();
 	tlbw_use_hazard();
 	write_c0_entryhi(old_ctx);
+	mtc0_tlbw_hazard();
 	EXIT_CRITICAL(flags);
 #endif
 	dec_preempt_count();

@@ -162,7 +162,7 @@ static int microMIPS32_to_MIPS32(union mips_instruction *insn_ptr)
 		if ((insn.mm_i_format.rt == mm_bc1f_op) ||
 		    (insn.mm_i_format.rt == mm_bc1t_op)) {
 			mips32_insn.fb_format.opcode = cop1_op;
-			mips32_insn.fb_format.bc = bc_op;
+			mips32_insn.fb_format.bc = rs_bc_op;
 			mips32_insn.fb_format.flag =
 				(insn.mm_i_format.rt == mm_bc1t_op) ? 1 : 0;
 		} else
@@ -676,12 +676,26 @@ int mm_isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
  * a single subroutine should be used across both
  * modules.
  */
+/*  Note on R6 compact branches:
+ *      Compact branches doesn't do exception (besides BC1EQZ/BC1NEZ)
+ *      and doesn't execute instruction in Forbidden Slot if branch is
+ *      to be taken. It means that return EPC for them can be safely set
+ *      to EPC + 8 because it is the only case to get a BD precise exception
+ *      doing instruction in Forbidden Slot while no branch.
+ *
+ *      Unconditional compact jump/branches added for full picture
+ *      (not doing BD precise exception, actually).
+ */
 static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			 unsigned long *contpc)
 {
 	union mips_instruction insn = (union mips_instruction)dec_insn.insn;
-	unsigned int fcr31;
 	unsigned int bit = 0;
+#ifdef CONFIG_CPU_MIPSR6
+	int reg;
+#else
+	unsigned int fcr31;
+#endif
 
 	switch (insn.i_format.opcode) {
 	case spec_op:
@@ -691,7 +705,9 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 				regs->cp0_epc + dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
 			/* Fall through */
+#ifndef CONFIG_CPU_MIPSR6
 		case jr_op:
+#endif
 			*contpc = regs->regs[insn.r_format.rs];
 			return 1;
 			break;
@@ -699,14 +715,22 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		break;
 	case bcond_op:
 		switch (insn.i_format.rt) {
+#ifdef CONFIG_CPU_MIPSR6
+		case nal_op:    /* MIPSR6: nal == bltzal $0 */
+			if (insn.i_format.rs)
+				break;
+#else
 		case bltzal_op:
 		case bltzall_op:
+#endif
 			regs->regs[31] = regs->cp0_epc +
 				dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
 			/* Fall through */
 		case bltz_op:
+#ifndef CONFIG_CPU_MIPSR6
 		case bltzl_op:
+#endif
 			if ((long)regs->regs[insn.i_format.rs] < 0)
 				*contpc = regs->cp0_epc +
 					dec_insn.pc_inc +
@@ -717,14 +741,22 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 					dec_insn.next_pc_inc;
 			return 1;
 			break;
+#ifdef CONFIG_CPU_MIPSR6
+		case bal_op:    /* MIPSR6: bal == bgezal $0 */
+			if (insn.i_format.rs)
+				break;
+#else
 		case bgezal_op:
 		case bgezall_op:
+#endif
 			regs->regs[31] = regs->cp0_epc +
 				dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
 			/* Fall through */
 		case bgez_op:
+#ifndef CONFIG_CPU_MIPSR6
 		case bgezl_op:
+#endif
 			if ((long)regs->regs[insn.i_format.rs] >= 0)
 				*contpc = regs->cp0_epc +
 					dec_insn.pc_inc +
@@ -754,7 +786,9 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		return 1;
 		break;
 	case beq_op:
+#ifndef CONFIG_CPU_MIPSR6
 	case beql_op:
+#endif
 		if (regs->regs[insn.i_format.rs] ==
 		    regs->regs[insn.i_format.rt])
 			*contpc = regs->cp0_epc +
@@ -767,7 +801,9 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		return 1;
 		break;
 	case bne_op:
+#ifndef CONFIG_CPU_MIPSR6
 	case bnel_op:
+#endif
 		if (regs->regs[insn.i_format.rs] !=
 		    regs->regs[insn.i_format.rt])
 			*contpc = regs->cp0_epc +
@@ -780,7 +816,22 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		return 1;
 		break;
 	case blez_op:
-	case blezl_op:
+#ifdef CONFIG_CPU_MIPSR6
+		/*
+		 *  Compact branches: blezalc, bgezalc, bgeuc
+		 */
+		if (insn.i_format.rt) {
+			if ((insn.i_format.rs == insn.i_format.rt) ||
+			    !insn.i_format.rs)   /* blezalc, bgezalc */
+				regs->regs[31] = regs->cp0_epc +
+					dec_insn.pc_inc;
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				dec_insn.next_pc_inc;
+			return 1;
+			break;
+		}
+
 		if ((long)regs->regs[insn.i_format.rs] <= 0)
 			*contpc = regs->cp0_epc +
 				dec_insn.pc_inc +
@@ -791,8 +842,46 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 				dec_insn.next_pc_inc;
 		return 1;
 		break;
+#endif
+	case blezl_op:
+#ifdef CONFIG_CPU_MIPSR6
+		/*
+		 *  Compact branches: blezc, bgezc, bgec
+		 */
+		*contpc = regs->cp0_epc +
+			dec_insn.pc_inc +
+			dec_insn.next_pc_inc;
+		return 1;
+		break;
+#else
+		if ((long)regs->regs[insn.i_format.rs] <= 0)
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				(insn.i_format.simmediate << 2);
+		else
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				dec_insn.next_pc_inc;
+		return 1;
+		break;
+#endif
 	case bgtz_op:
-	case bgtzl_op:
+#ifdef CONFIG_CPU_MIPSR6
+		/*
+		 *  Compact branches: bltzalc, bgtzalc, bltuc
+		 */
+		if (insn.i_format.rt) {
+			if ((insn.i_format.rs == insn.i_format.rt) ||
+			    !insn.i_format.rs)   /* bltzalc, bgtzalc */
+				regs->regs[31] = regs->cp0_epc +
+					dec_insn.pc_inc;
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				dec_insn.next_pc_inc;
+			return 1;
+			break;
+		}
+
 		if ((long)regs->regs[insn.i_format.rs] > 0)
 			*contpc = regs->cp0_epc +
 				dec_insn.pc_inc +
@@ -803,11 +892,84 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 				dec_insn.next_pc_inc;
 		return 1;
 		break;
+#endif
+	case bgtzl_op:
+#ifdef CONFIG_CPU_MIPSR6
+		/*
+		 *  Compact branches: bltc, bltzc, bgtzc
+		 */
+		*contpc = regs->cp0_epc +
+			dec_insn.pc_inc +
+			dec_insn.next_pc_inc;
+		return 1;
+		break;
+#else
+		if ((long)regs->regs[insn.i_format.rs] > 0)
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				(insn.i_format.simmediate << 2);
+		else
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				dec_insn.next_pc_inc;
+		return 1;
+		break;
+#endif
+
+#ifdef CONFIG_CPU_MIPSR6
+	case cbcond0_op:
+		/*
+		 *  Compact branches: bovc, beqc, beqzalc
+		 */
+
+		/* fall through */
+	case cbcond1_op:
+		/*
+		 *  Compact branches: bnvc, bnec, bnezalc
+		 */
+		if (insn.i_format.rt && !insn.i_format.rs)  /* beqzalc/bnezalc */
+			regs->regs[31] = regs->cp0_epc +
+				dec_insn.pc_inc;
+		*contpc = regs->cp0_epc +
+			dec_insn.pc_inc +
+			dec_insn.next_pc_inc;
+		return 1;
+#endif
+
+#ifdef CONFIG_CPU_MIPSR6
+	case cop1_op:
+		if ((insn.i_format.rs != bc1eqz_op) &&
+		    (insn.i_format.rs != bc1nez_op))
+			break;
+
+		reg = insn.i_format.rt;
+		bit = 0;
+		switch (insn.i_format.rs) {
+		case bc1eqz_op:
+			if (current->thread.fpu.fpr[reg] == (__u64)0)
+				bit = 1;
+			break;
+		case bc1nez_op:
+			if (current->thread.fpu.fpr[reg] != (__u64)0)
+				bit = 1;
+			break;
+		}
+		if (bit)
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				(insn.i_format.simmediate << 2);
+		else
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				dec_insn.next_pc_inc;
+		return 1;
+		break;
+#else
 	case cop0_op:
 	case cop1_op:
 	case cop2_op:
 	case cop1x_op:
-		if (insn.i_format.rs == bc_op) {
+		if (insn.i_format.rs == rs_bc_op) {
 			preempt_disable();
 			if (is_fpu_owner())
 				asm volatile("cfc1\t%0,$31" : "=r" (fcr31));
@@ -846,6 +1008,7 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			}
 		}
 		break;
+#endif
 	}
 	return 0;
 }
@@ -1054,7 +1217,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			break;
 #endif
 
-#ifdef CONFIG_CPU_MIPSR2
+#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6)
 		case mfhc_op:
 			/* copregister rd -> gpr[rt] */
 			if (MIPSInst_RT(ir) != 0) {
@@ -1137,7 +1300,29 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			break;
 		}
 
-		case bc_op:{
+#ifdef CONFIG_CPU_MIPSR6
+		case bc1eqz_op:
+		case bc1nez_op:
+		{
+			int reg;
+
+			if (xcp->cp0_cause & CAUSEF_BD)
+				return SIGILL;
+
+			reg = MIPSInst_FT(ir);
+			cond = 0;
+			switch (MIPSInst_RS(ir)) {
+			case bc1eqz_op:
+				if (current->thread.fpu.fpr[reg] == (__u64)0)
+					cond = 1;
+				break;
+			case bc1nez_op:
+				if (current->thread.fpu.fpr[reg] != (__u64)0)
+					cond = 1;
+				break;
+			}
+#else /* !CONFIG_CPU_MIPSR6 */
+		case rs_bc_op:{
 			int likely = 0;
 
 			if (xcp->cp0_cause & CAUSEF_BD)
@@ -1162,6 +1347,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 				/* thats an illegal instruction */
 				return SIGILL;
 			}
+#endif /* CONFIG_CPU_MIPSR6 */
 
 			xcp->cp0_cause |= CAUSEF_BD;
 			if (cond) {
@@ -1211,12 +1397,14 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 #endif
 					/* its one of ours */
 					goto emul;
+#ifndef CONFIG_CPU_MIPSR6
 #if __mips >= 4
 				case spec_op:
 					if (MIPSInst_FUNC(ir) == movc_op)
 						goto emul;
 					break;
 #endif
+#endif /* CONFIG_CPU_MIPSR6 */
 				}
 
 				/*
@@ -1225,6 +1413,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 				 */
 				return mips_dsemul(xcp, ir, contpc);
 			}
+#ifndef CONFIG_CPU_MIPSR6
 			else {
 				/* branch not taken */
 				if (likely) {
@@ -1240,6 +1429,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 					 */
 				}
 			}
+#endif /* CONFIG_CPU_MIPSR6 */
 			break;
 		}
 
@@ -1265,6 +1455,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 	}
 #endif
 
+#ifndef CONFIG_CPU_MIPSR6
 #if __mips >= 4
 	case spec_op:
 		if (MIPSInst_FUNC(ir) != movc_op)
@@ -1274,6 +1465,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			xcp->regs[MIPSInst_RD(ir)] =
 				xcp->regs[MIPSInst_RS(ir)];
 		break;
+#endif
 #endif
 
 	default:

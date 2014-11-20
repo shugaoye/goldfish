@@ -955,6 +955,17 @@ static void r4k_dma_cache_inv(unsigned long addr, unsigned long size)
  * very much about what happens in that case.  Usually a segmentation
  * fault will dump the process later on anyway ...
  */
+#ifdef CONFIG_CPU_MIPSR6
+static void local_r4k_flush_cache_sigtramp(void * arg)
+{
+	register unsigned long addr = (unsigned long) arg;
+
+	__asm__ __volatile__(
+		"synci  0(%0)       \n"
+		"sync               \n"
+		::"r"(addr):"memory");
+}
+#else
 static void local_r4k_flush_cache_sigtramp(void * arg)
 {
 	unsigned long ic_lsize = cpu_icache_line_size();
@@ -990,6 +1001,7 @@ static void local_r4k_flush_cache_sigtramp(void * arg)
 	if (MIPS_CACHE_SYNC_WAR)
 		__asm__ __volatile__ ("sync");
 }
+#endif
 
 static void r4k_flush_cache_sigtramp(unsigned long addr)
 {
@@ -1571,7 +1583,8 @@ static void __cpuinit setup_scache(void)
 
 	default:
 		if (c->isa_level & (MIPS_CPU_ISA_M32R1 | MIPS_CPU_ISA_M32R2 |
-				    MIPS_CPU_ISA_M64R1 | MIPS_CPU_ISA_M64R2)) {
+				    MIPS_CPU_ISA_M64R1 | MIPS_CPU_ISA_M64R2 |
+				    MIPS_CPU_ISA_M32R6 | MIPS_CPU_ISA_M64R6)) {
 #ifdef CONFIG_MIPS_CPU_SCACHE
 			if (mips_sc_init ()) {
 				scache_size = c->scache.ways * c->scache.sets * c->scache.linesz;

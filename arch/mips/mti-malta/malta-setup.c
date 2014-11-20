@@ -370,6 +370,10 @@ void __init plat_mem_setup(void)
 {
 	unsigned int i;
 
+#ifdef CONFIG_CPU_MIPSR6
+	pr_info("BEVVA = %lx\n", read_c0_bevva());
+#endif
+
 #ifdef CONFIG_EVA
 #ifdef CONFIG_MIPS_CMP
 	if (gcmp_present)

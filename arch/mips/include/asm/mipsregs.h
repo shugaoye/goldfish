@@ -270,6 +270,8 @@
 #define PG_XIE		(_ULCAST_(1) <<	 30)
 #define PG_ELPA		(_ULCAST_(1) <<	 29)
 #define PG_ESP		(_ULCAST_(1) <<	 28)
+#define PG_IEC          (_ULCAST_(1) <<  27)
+#define PG_MCCAUSE      (_ULCAST_(0x1f) << 0)
 
 /*
  * R4x00 interrupt enable / cause bits
@@ -638,9 +640,11 @@
 #define MIPS_CONF4_VTLBSIZEEXT_SHIFT	(24)
 #define MIPS_CONF4_VTLBSIZEEXT	(_ULCAST_(15) << MIPS_CONF4_VTLBSIZEEXT_SHIFT)
 #define MIPS_CONF4_AE		(_ULCAST_(1) << 28)
-#define MIPS_CONF4_IE		(_ULCAST_(3) << 29)
-#define MIPS_CONF4_TLBINV	(_ULCAST_(2) << 29)
+#define MIPS_CONF4_IE           (_ULCAST_(3) << 29)
+#define MIPS_CONF4_TLBINV       (_ULCAST_(2) << 29)
+#define MIPS_CONF4_TLBINV_FULL  (_ULCAST_(1) << 29)
 
+#define MIPS_CONF5_MRP          (_ULCAST_(1) << 3)
 #define MIPS_CONF5_EVA		(_ULCAST_(1) << 28)
 #define MIPS_CONF5_CV		(_ULCAST_(1) << 29)
 #define MIPS_CONF5_K		(_ULCAST_(1) << 30)
@@ -695,6 +699,13 @@
 
 /* ebase register bit definition */
 #define MIPS_EBASE_WG           (_ULCAST_(1) << 11)
+
+/* MAAR bits definitions */
+#define MIPS_MAAR_V             (_ULCAST_(1))
+#define MIPS_MAAR_S             (_ULCAST_(1) << 1)
+#define MIPS_MAAR_HI_V          (_ULCAST_(1) << 31)
+
+#define MIPS_MAAR_MAX           64
 
 #ifndef __ASSEMBLY__
 
@@ -1006,6 +1017,7 @@ do {									\
 
 #define read_c0_prid()		__read_32bit_c0_register($15, 0)
 #define read_c0_cmgcrbase()     __read_ulong_c0_register($15, 3)
+#define read_c0_bevva()         __read_ulong_c0_register($15, 4)
 
 #define read_c0_config()	__read_32bit_c0_register($16, 0)
 #define read_c0_config1()	__read_32bit_c0_register($16, 1)
@@ -1023,6 +1035,16 @@ do {									\
 #define write_c0_config5(val)	__write_32bit_c0_register($16, 5, val)
 #define write_c0_config6(val)	__write_32bit_c0_register($16, 6, val)
 #define write_c0_config7(val)	__write_32bit_c0_register($16, 7, val)
+
+#define read_c0_lladdr()        __read_ulong_c0_register($17, 0)
+#define write_c0_lladdr(val)    __write_ulong_c0_register($17, 0, val)
+/*
+ * MAAR registers
+ */
+#define read_c0_maar()          __read_ulong_c0_register($17, 1)
+#define write_c0_maar(val)      __write_ulong_c0_register($17, 1, val)
+#define read_c0_maarindex()     __read_32bit_c0_register($17, 2)
+#define write_c0_maarindex(val) __write_32bit_c0_register($17, 2, val)
 
 /*
  * The WatchLo register.  There may be up to 8 of them.
@@ -1277,6 +1299,7 @@ do {									\
 	:: "r" (value));                                                \
 })
 
+#ifndef CONFIG_CPU_MIPSR6
 /*
  * Macros to access the DSP ASE registers
  */
@@ -1665,6 +1688,7 @@ do {									\
 
 #endif /* CONFIG_CPU_MICROMIPS */
 #endif
+#endif /* CONFIG_CPU_MIPSR6 */
 
 /*
  * TLB operations.
@@ -1735,10 +1759,7 @@ static inline void tlb_write_random(void)
 static inline void tlbinvf(void)
 {
 	__asm__ __volatile__(
-		".set push\n\t"
-		".set noreorder\n\t"
-		".word 0x42000004\n\t"
-		".set pop");
+		".word 0x42000004");
 }
 
 /*
@@ -1833,7 +1854,8 @@ static inline void __ehb(void)
 {
 	__asm__ __volatile__(
 	"	.set	mips32r2					\n"
-	"	ehb							\n"		"	.set	mips0						\n");
+	"       ehb                                                     \n"
+	"       .set    mips0                                           \n");
 }
 
 /*

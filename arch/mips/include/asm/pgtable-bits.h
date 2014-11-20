@@ -102,7 +102,7 @@
 
 #else /* 'Normal' r4K case */
 
-#ifndef CONFIG_CPU_MIPSR2
+#if !defined(CONFIG_CPU_MIPSR2) && !defined(CONFIG_CPU_MIPSR6)
 /*
  * When using the RI/XI bit support, we have 13 bits of flags below
  * the physical address. The RI/XI bits are placed such that a SRL 5
@@ -157,7 +157,7 @@
 #define _PAGE_NO_READ_SHIFT	(cpu_has_rixi ? _PAGE_NO_EXEC_SHIFT + 1 : _PAGE_NO_EXEC_SHIFT)
 #define _PAGE_NO_READ		({BUG_ON(!cpu_has_rixi); 1 << _PAGE_NO_READ_SHIFT; })
 
-#else /* CONFIG_CPU_MIPSR2 */
+#else /* CONFIG_CPU_MIPSR2 || CONFIG_CPU_MIPSR6 */
 
 /* static bits allocation in MIPS R2, two variants -
    HUGE TLB in 64BIT kernel support or not.
@@ -299,7 +299,7 @@
 
 #endif /* CONFIG_64BIT */
 
-#endif /* !CONFIG_CPU_MIPSR2 */
+#endif /* !CONFIG_CPU_MIPSR2 && !CONFIG_CPU_MIPSR6 */
 
 
 #define _PAGE_GLOBAL_SHIFT      (_PAGE_NO_READ_SHIFT + 1)

@@ -18,20 +18,35 @@
 enum major_op {
 	spec_op, bcond_op, j_op, jal_op,
 	beq_op, bne_op, blez_op, bgtz_op,
+#ifndef CONFIG_CPU_MIPSR6
 	addi_op, addiu_op, slti_op, sltiu_op,
+#else
+	cbcond0_op, addiu_op, slti_op, sltiu_op,
+#endif
 	andi_op, ori_op, xori_op, lui_op,
 	cop0_op, cop1_op, cop2_op, cop1x_op,
 	beql_op, bnel_op, blezl_op, bgtzl_op,
+#ifndef CONFIG_CPU_MIPSR6
 	daddi_op, daddiu_op, ldl_op, ldr_op,
+#else
+	cbcond1_op, daddiu_op, ldl_op, ldr_op,
+#endif
 	spec2_op, jalx_op, mdmx_op, spec3_op,
 	lb_op, lh_op, lwl_op, lw_op,
 	lbu_op, lhu_op, lwr_op, lwu_op,
 	sb_op, sh_op, swl_op, sw_op,
 	sdl_op, sdr_op, swr_op, cache_op,
+#ifndef CONFIG_CPU_MIPSR6
 	ll_op, lwc1_op, lwc2_op, pref_op,
 	lld_op, ldc1_op, ldc2_op, ld_op,
 	sc_op, swc1_op, swc2_op, major_3b_op,
 	scd_op, sdc1_op, sdc2_op, sd_op
+#else
+	ll_op, lwc1_op, bc_op, pref_op,
+	lld_op, ldc1_op, jump_op, ld_op,
+	sc_op, swc1_op, balc_op, major_3b_op,
+	scd_op, sdc1_op, jump2_op, sd_op
+#endif
 };
 
 /*
@@ -80,10 +95,13 @@ enum spec3_op {
 	sce_op = 0x1e, swe_op = 0x1f,
 	bshfl_op = 0x20, swle_op = 0x21,
 	swre_op = 0x22, prefe_op = 0x23,
-	dbshfl_op = 0x24,
+	dbshfl_op = 0x24, cache6_op = 0x25,
+	sc6_op = 0x26, scd6_op = 0x27,
 	lbue_op = 0x28, lhue_op = 0x29,
 	lbe_op = 0x2c, lhe_op = 0x2d,
 	lle_op = 0x2e, lwe_op = 0x2f,
+	pref6_op = 0x35, ll6_op = 0x36,
+	lld6_op = 0x37,
 	rdhwr_op = 0x3b
 };
 
@@ -95,7 +113,11 @@ enum rt_op {
 	spimi_op, unused_rt_op_0x05, unused_rt_op_0x06, unused_rt_op_0x07,
 	tgei_op, tgeiu_op, tlti_op, tltiu_op,
 	teqi_op, unused_0x0d_rt_op, tnei_op, unused_0x0f_rt_op,
+#ifndef CONFIG_CPU_MIPSR6
 	bltzal_op, bgezal_op, bltzall_op, bgezall_op,
+#else
+	nal_op, bal_op, rt_op_0x12_op, rt_op_0x13_op,
+#endif
 	rt_op_0x14, rt_op_0x15, rt_op_0x16, rt_op_0x17,
 	rt_op_0x18, rt_op_0x19, rt_op_0x1a, rt_op_0x1b,
 	bposge32_op, rt_op_0x1d, rt_op_0x1e, rt_op_0x1f
@@ -109,12 +131,13 @@ enum cop_op {
 	cfc_op	      = 0x02, mfhc_op	    = 0x03,
 	mtc_op        = 0x04, dmtc_op	    = 0x05,
 	ctc_op	      = 0x06, mthc_op	    = 0x07,
-	bc_op	      = 0x08, cop_op	    = 0x10,
+	rs_bc_op      = 0x08, bc1eqz_op     = 0x09,
+	bc1nez_op     = 0x0d, cop_op        = 0x10,
 	copm_op	      = 0x18
 };
 
 /*
- * rt field of cop.bc_op opcodes
+ * rt field of cop.rs_bc_op opcodes
  */
 enum bcop_op {
 	bcf_op, bct_op, bcfl_op, bctl_op

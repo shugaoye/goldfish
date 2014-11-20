@@ -18,6 +18,8 @@
 #include <asm/mipsregs.h>
 #include <asm/setup.h>
 
+#ifndef CONFIG_CPU_MIPSR6
+
 static char bug64hit[] __initdata =
 	"reliable operation impossible!\n%s";
 static char nowar[] __initdata =
@@ -317,3 +319,14 @@ void __init check_bugs64(void)
 {
 	check_daddi();
 }
+
+#else /* CONFIG_CPU_MIPSR6 */
+
+static volatile int daddi_ov __cpuinitdata;
+int daddiu_bug  = 0;
+
+void __init check_bugs64_early(void) {}
+
+void __init check_bugs64(void) {}
+
+#endif /* CONFIG_CPU_MIPSR6 */

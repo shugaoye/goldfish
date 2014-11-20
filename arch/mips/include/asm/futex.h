@@ -17,6 +17,39 @@
 #include <asm/war.h>
 
 #ifndef CONFIG_EVA
+#ifdef CONFIG_CPU_MIPSR6
+#define __futex_atomic_op(insn, ret, oldval, uaddr, oparg)              \
+{									\
+	if (cpu_has_llsc) {                                             \
+		__asm__ __volatile__(					\
+		"	.set	push				\n"	\
+		"	.set	noat				\n"	\
+		"       .set    mips64r6                        \n"     \
+		"1:	ll	%1, %4	# __futex_atomic_op	\n"	\
+		"	.set	mips0				\n"	\
+		"	" insn	"				\n"	\
+		"       .set    mips64r6                        \n"     \
+		"2:	sc	$1, %2				\n"	\
+		"	beqz	$1, 1b				\n"	\
+		__WEAK_LLSC_MB						\
+		"3:						\n"	\
+		"	.set	pop				\n"	\
+		"	.set	mips0				\n"	\
+		"	.section .fixup,\"ax\"			\n"	\
+		"4:	li	%0, %6				\n"	\
+		"	j	3b				\n"	\
+		"	.previous				\n"	\
+		"	.section __ex_table,\"a\"		\n"	\
+		"	"__UA_ADDR "\t1b, 4b			\n"	\
+		"	"__UA_ADDR "\t2b, 4b			\n"	\
+		"	.previous				\n"	\
+		: "=r" (ret), "=&r" (oldval), "=R" (*uaddr)		\
+		: "0" (0), "R" (*uaddr), "Jr" (oparg), "i" (-EFAULT)	\
+		: "memory");						\
+	} else								\
+		ret = -ENOSYS;						\
+}
+#else /* !CONFIG_CPU_MIPSR6 */
 #define __futex_atomic_op(insn, ret, oldval, uaddr, oparg)		\
 {									\
 	if (cpu_has_llsc && R10000_LLSC_WAR) {				\
@@ -74,6 +107,7 @@
 	} else								\
 		ret = -ENOSYS;						\
 }
+#endif /* CONFIG_CPU_MIPSR6 */
 #else
 #define __futex_atomic_op(insn, ret, oldval, uaddr, oparg)		\
 {									\
@@ -236,12 +270,20 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
 		"# futex_atomic_cmpxchg_inatomic			\n"
 		"	.set	push					\n"
 		"	.set	noat					\n"
+#ifdef CONFIG_CPU_MIPSR6
+		"       .set    mips64r6                                \n"
+#else
 		"	.set	mips3					\n"
+#endif
 		"1:	ll	%1, %3					\n"
 		"	bne	%1, %z4, 3f				\n"
 		"	.set	mips0					\n"
 		"	move	$1, %z5					\n"
+#ifdef CONFIG_CPU_MIPSR6
+		"       .set    mips64r6                                \n"
+#else
 		"	.set	mips3					\n"
+#endif
 		"2:	sc	$1, %2					\n"
 		"	beqz	$1, 1b					\n"
 		__WEAK_LLSC_MB

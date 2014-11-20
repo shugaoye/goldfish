@@ -27,6 +27,9 @@
 #ifdef CONFIG_MIPS_MALTA
 #undef CONFIG_CPU_HAS_PREFETCH
 #endif
+#ifdef CONFIG_CPU_MIPSR6
+#undef CONFIG_CPU_HAS_PREFETCH
+#endif
 
 #include <asm/asm.h>
 #include <asm/asm-offsets.h>
@@ -101,10 +104,12 @@
 #ifdef USE_DOUBLE
 
 #define LOAD   ld
+#ifndef CONFIG_CPU_MIPSR6
 #define LOADL  ldl
 #define LOADR  ldr
 #define STOREL sdl
 #define STORER sdr
+#endif
 #define STORE  sd
 #define ADD    daddu
 #define SUB    dsubu
@@ -139,10 +144,12 @@
 #else
 
 #define LOAD   lw
+#ifndef CONFIG_CPU_MIPSR6
 #define LOADL  lwl
 #define LOADR  lwr
 #define STOREL swl
 #define STORER swr
+#endif
 #define STORE  sw
 #define ADD    addu
 #define SUB    subu
@@ -231,9 +238,14 @@ __copy_user_common:
 	 and	t0, src, ADDRMASK
 	PREF(	0, 2*32(src) )
 	PREF(	1, 2*32(dst) )
+#ifndef CONFIG_CPU_MIPSR6
 	bnez	t1, .Ldst_unaligned
 	 nop
 	bnez	t0, .Lsrc_unaligned_dst_aligned
+#else
+	or      t0, t0, t1
+	bnez    t0, .Lcopy_unaligned_bytes
+#endif
 	/*
 	 * use delay slot for fall-through
 	 * src and dst are aligned; need to compute rem
@@ -314,6 +326,7 @@ EXC(	STORE	t0, 0(dst),		.Ls_exc_p1u)
 	bne	rem, len, 1b
 	.set	noreorder
 
+#ifndef CONFIG_CPU_MIPSR6
 	/*
 	 * src and dst are aligned, need to copy rem bytes (rem < NBYTES)
 	 * A loop would do only a byte at a time with possible branch
@@ -414,6 +427,7 @@ EXC(	STORE	t0, 0(dst),		.Ls_exc_p1u)
 	ADD	dst, dst, NBYTES
 	bne	len, rem, 1b
 	.set	noreorder
+#endif /* !CONFIG_CPU_MIPSR6 */
 
 .Lcopy_bytes_checklen:
 	beqz	len, .Ldone
@@ -442,6 +456,23 @@ EXC(	 sb	t0, NBYTES-2(dst), .Ls_exc_p1)
 .Ldone:
 	jr	ra
 	 nop
+
+#ifdef CONFIG_CPU_MIPSR6
+.Lcopy_unaligned_bytes:
+1:
+	COPY_BYTE(0)
+	COPY_BYTE(1)
+	COPY_BYTE(2)
+	COPY_BYTE(3)
+	COPY_BYTE(4)
+	COPY_BYTE(5)
+	COPY_BYTE(6)
+	COPY_BYTE(7)
+	ADD     src, src, 8
+	b       1b
+	 ADD    dst, dst, 8
+#endif /* CONFIG_CPU_MIPSR6 */
+
 	END(memcpy)
 
 .Ll_exc_copy:

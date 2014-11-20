@@ -27,6 +27,9 @@
 #ifndef cpu_has_tlbinv
 #define cpu_has_tlbinv          (cpu_data[0].options & MIPS_CPU_TLBINV)
 #endif
+#ifndef cpu_has_tlbinv_full
+#define cpu_has_tlbinv_full     (cpu_data[0].options & MIPS_CPU_TLBINV_FULL)
+#endif
 #ifndef cpu_has_4kex
 #define cpu_has_4kex		(cpu_data[0].options & MIPS_CPU_4KEX)
 #endif
@@ -72,7 +75,11 @@
 #define cpu_has_cache_cdex_s	(cpu_data[0].options & MIPS_CPU_CACHE_CDEX_S)
 #endif
 #ifndef cpu_has_prefetch
-#define cpu_has_prefetch	(cpu_data[0].options & MIPS_CPU_PREFETCH)
+#ifdef CONFIG_CPU_MIPSR6
+#define cpu_has_prefetch        (0)
+#else
+#define cpu_has_prefetch        (cpu_data[0].options & MIPS_CPU_PREFETCH)
+#endif
 #endif
 #ifndef cpu_has_mcheck
 #define cpu_has_mcheck		(cpu_data[0].options & MIPS_CPU_MCHECK)
@@ -100,6 +107,9 @@
 #endif
 #ifndef cpu_has_rixi
 #define cpu_has_rixi		(cpu_data[0].options & MIPS_CPU_RIXI)
+#endif
+#ifndef cpu_has_rixi_except
+#define cpu_has_rixi_except     (cpu_data[0].options & MIPS_CPU_RIXI_EXCEPT)
 #endif
 #ifndef cpu_has_mmips
 # ifdef CONFIG_SYS_SUPPORTS_MICROMIPS
@@ -140,6 +150,9 @@
 #define cpu_has_cm2             (0)
 #define cpu_has_cm2_l2sync      (0)
 #endif
+#ifndef cpu_has_maar
+#define cpu_has_maar            (cpu_data[0].options2 & MIPS_CPU_MAAR)
+#endif
 
 /*
  * I-Cache snoops remote store.	 This only matters on SMP.  Some multiprocessors
@@ -179,25 +192,33 @@
 # ifndef cpu_has_mips32r2
 # define cpu_has_mips32r2	(cpu_data[0].isa_level & MIPS_CPU_ISA_M32R2)
 # endif
+# ifndef cpu_has_mips32r6
+# define cpu_has_mips32r6       (cpu_data[0].isa_level & MIPS_CPU_ISA_M32R6)
+# endif
 # ifndef cpu_has_mips64r1
 # define cpu_has_mips64r1	(cpu_data[0].isa_level & MIPS_CPU_ISA_M64R1)
 # endif
 # ifndef cpu_has_mips64r2
 # define cpu_has_mips64r2	(cpu_data[0].isa_level & MIPS_CPU_ISA_M64R2)
 # endif
+# ifndef cpu_has_mips64r6
+# define cpu_has_mips64r6       (cpu_data[0].isa_level & MIPS_CPU_ISA_M64R6)
+# endif
 
 /*
  * Shortcuts ...
  */
-#define cpu_has_mips32	(cpu_has_mips32r1 | cpu_has_mips32r2)
-#define cpu_has_mips64	(cpu_has_mips64r1 | cpu_has_mips64r2)
+#define cpu_has_mips32  (cpu_has_mips32r1 | cpu_has_mips32r2 | cpu_has_mips32r6)
+#define cpu_has_mips64  (cpu_has_mips64r1 | cpu_has_mips64r2 | cpu_has_mips64r6)
 #define cpu_has_mips_r1 (cpu_has_mips32r1 | cpu_has_mips64r1)
 #define cpu_has_mips_r2 (cpu_has_mips32r2 | cpu_has_mips64r2)
+#define cpu_has_mips_r6 (cpu_has_mips32r6 | cpu_has_mips64r6)
 #define cpu_has_mips_r	(cpu_has_mips32r1 | cpu_has_mips32r2 | \
-			 cpu_has_mips64r1 | cpu_has_mips64r2)
+			 cpu_has_mips64r1 | cpu_has_mips64r2 | \
+			 cpu_has_mips32r6 | cpu_has_mips64r6)
 
 #ifndef cpu_has_mips_r2_exec_hazard
-#define cpu_has_mips_r2_exec_hazard cpu_has_mips_r2
+#define cpu_has_mips_r2_exec_hazard (cpu_has_mips_r2 | cpu_has_mips_r6)
 #endif
 
 /*
@@ -210,6 +231,13 @@
 # define cpu_has_clo_clz	cpu_has_mips_r
 # endif
 
+#ifdef CONFIG_CPU_MIPSR6
+
+#define cpu_has_dsp     0
+#define cpu_has_dsp2    0
+
+#else /* !CONFIG_CPU_MIPSR6 */
+
 #ifndef cpu_has_dsp
 #define cpu_has_dsp		(cpu_data[0].ases & MIPS_ASE_DSP)
 #endif
@@ -217,6 +245,8 @@
 #ifndef cpu_has_dsp2
 #define cpu_has_dsp2		(cpu_data[0].ases & MIPS_ASE_DSP2P)
 #endif
+
+#endif /* CONFIG_CPU_MIPSR6 */
 
 #ifndef cpu_has_mipsmt
 #define cpu_has_mipsmt		(cpu_data[0].ases & MIPS_ASE_MIPSMT)

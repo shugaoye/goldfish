@@ -66,6 +66,8 @@ EXPORT_PER_CPU_SYMBOL(cpu_sibling_map);
 /* representing cpus for which sibling maps can be computed */
 static cpumask_t cpu_sibling_setup_map;
 
+extern void maar_setup(void);
+
 /* CPU siblings in MIPS:
  *
  *      SMVP kernel - VPEs on common core are siblings
@@ -115,6 +117,7 @@ asmlinkage __cpuinit void start_secondary(void)
 #endif /* CONFIG_MIPS_MT_SMTC */
 	cpu_probe();
 	cpu_report();
+	maar_setup();
 	per_cpu_trap_init(false);
 	mips_clockevent_init();
 	mp_ops->init_secondary();

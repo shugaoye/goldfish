@@ -15,6 +15,8 @@
 #include <asm/hazards.h>
 #include <asm/mipsregs.h>
 
+#ifndef CONFIG_CPU_MIPSR6
+
 #define DSP_DEFAULT	0x00000000
 #define DSP_MASK	0x3f
 
@@ -81,5 +83,16 @@ do {									\
 									\
 	tsk->thread.dsp.dspr;						\
 })
+
+#else
+
+#define __init_dsp(void)    do { } while(0)
+#define init_dsp(void)      do { } while(0)
+#define save_dsp(void)      do { } while(0)
+#define restore_dsp(void)   do { } while(0)
+#define __save_dsp(void)      do { } while(0)
+#define __restore_dsp(void)   do { } while(0)
+
+#endif /* CONFIG_CPU_MIPSR6 */
 
 #endif /* _ASM_DSP_H */

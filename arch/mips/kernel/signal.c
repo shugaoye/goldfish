@@ -142,6 +142,7 @@ int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 #endif
 	err |= __put_user(regs->hi, &sc->sc_mdhi);
 	err |= __put_user(regs->lo, &sc->sc_mdlo);
+#ifndef CONFIG_CPU_MIPSR6
 	if (cpu_has_dsp) {
 		err |= __put_user(mfhi1(), &sc->sc_hi1);
 		err |= __put_user(mflo1(), &sc->sc_lo1);
@@ -151,6 +152,7 @@ int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		err |= __put_user(mflo3(), &sc->sc_lo3);
 		err |= __put_user(rddsp(DSP_MASK), &sc->sc_dsp);
 	}
+#endif
 
 	used_math = !!used_math();
 	err |= __put_user(used_math, &sc->sc_used_math);
@@ -199,7 +201,9 @@ check_and_restore_fp_context(struct sigcontext __user *sc)
 int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 {
 	unsigned int used_math;
+#ifndef CONFIG_CPU_MIPSR6
 	unsigned long treg;
+#endif
 	int err = 0;
 	int i;
 
@@ -213,6 +217,7 @@ int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 #endif
 	err |= __get_user(regs->hi, &sc->sc_mdhi);
 	err |= __get_user(regs->lo, &sc->sc_mdlo);
+#ifndef CONFIG_CPU_MIPSR6
 	if (cpu_has_dsp) {
 		err |= __get_user(treg, &sc->sc_hi1); mthi1(treg);
 		err |= __get_user(treg, &sc->sc_lo1); mtlo1(treg);
@@ -222,6 +227,7 @@ int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		err |= __get_user(treg, &sc->sc_lo3); mtlo3(treg);
 		err |= __get_user(treg, &sc->sc_dsp); wrdsp(treg, DSP_MASK);
 	}
+#endif
 
 	for (i = 1; i < 32; i++)
 		err |= __get_user(regs->regs[i], &sc->sc_regs[i]);

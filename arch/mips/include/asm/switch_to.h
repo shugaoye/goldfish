@@ -58,11 +58,18 @@ do {									\
 #define __mips_mt_fpaff_switch_to(prev) do { (void) (prev); } while (0)
 #endif
 
-#define __clear_software_ll_bit()					\
+#ifdef CONFIG_CPU_MIPSR6
+#define __clear_ll_bit()                                                \
+do {									\
+	write_c0_lladdr(0);                                             \
+} while (0)
+#else
+#define __clear_ll_bit()                                                \
 do {									\
 	if (!__builtin_constant_p(cpu_has_llsc) || !cpu_has_llsc)	\
 		ll_bit = 0;						\
 } while (0)
+#endif
 
 #define switch_to(prev, next, last)					\
 do {									\
@@ -70,7 +77,7 @@ do {									\
 	__mips_mt_fpaff_switch_to(prev);				\
 	if (cpu_has_dsp)						\
 		__save_dsp(prev);					\
-	__clear_software_ll_bit();					\
+	__clear_ll_bit();                                               \
 	__usedfpu = test_and_clear_tsk_thread_flag(prev, TIF_USEDFPU);	\
 	(last) = resume(prev, next, task_thread_info(next), __usedfpu); \
 } while (0)

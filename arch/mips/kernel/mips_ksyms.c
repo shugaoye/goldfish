@@ -75,6 +75,7 @@ EXPORT_SYMBOL(__strncpy_from_user_nocheck_asm);
 EXPORT_SYMBOL(__strncpy_from_user_asm);
 #endif
 
+#ifndef CONFIG_CPU_MIPSR6
 EXPORT_SYMBOL(csum_partial);
 EXPORT_SYMBOL(csum_partial_copy_nocheck);
 EXPORT_SYMBOL(__csum_partial_copy_user);
@@ -82,6 +83,7 @@ EXPORT_SYMBOL(__csum_partial_copy_user);
 EXPORT_SYMBOL(__csum_partial_copy_fromuser);
 EXPORT_SYMBOL(__csum_partial_copy_touser);
 #endif
+#endif /* !CONFIG_CPU_MIPSR6 */
 
 EXPORT_SYMBOL(invalid_pte_table);
 #ifdef CONFIG_FUNCTION_TRACER

@@ -30,12 +30,16 @@
 	.endm
 
 	.set	noreorder
+#ifdef CONFIG_CPU_MIPSR6
+	.set    mips64r6
+#else
 	.set	mips3
+#endif
 
 LEAF(_save_fp_context)
 	cfc1	t1, fcr31
 
-#ifdef CONFIG_64BIT
+#if defined(CONFIG_64BIT) || defined(CONFIG_CPU_MIPSR6)
 	/* Store the 16 odd double precision registers */
 	EX	sdc1 $f1, SC_FPREGS+8(a0)
 	EX	sdc1 $f3, SC_FPREGS+24(a0)
@@ -54,7 +58,7 @@ LEAF(_save_fp_context)
 	EX	sdc1 $f29, SC_FPREGS+232(a0)
 	EX	sdc1 $f31, SC_FPREGS+248(a0)
 #else
-#ifdef CONFIG_MIPS32_R2
+#ifdef CONFIG_CPU_MIPS32_R2
 	.set    push
 	.set    mips64r2
 	.set    noreorder
@@ -168,7 +172,7 @@ LEAF(_save_fp_context32)
  */
 LEAF(_restore_fp_context)
 	EX	lw t0, SC_FPC_CSR(a0)
-#ifdef CONFIG_64BIT
+#if defined(CONFIG_64BIT) || defined(CONFIG_CPU_MIPSR6)
 	EX	ldc1 $f1, SC_FPREGS+8(a0)
 	EX	ldc1 $f3, SC_FPREGS+24(a0)
 	EX	ldc1 $f5, SC_FPREGS+40(a0)
@@ -187,7 +191,7 @@ LEAF(_restore_fp_context)
 	EX	ldc1 $f31, SC_FPREGS+248(a0)
 
 #else
-#ifdef CONFIG_MIPS32_R2
+#ifdef CONFIG_CPU_MIPS32_R2
 	.set    push
 	.set    mips64r2
 	.set    noreorder
@@ -240,7 +244,11 @@ LEAF(_restore_fp_context)
 #ifdef CONFIG_MIPS32_COMPAT
 LEAF(_restore_fp_context32)
 	.set    push
+#ifdef CONFIG_CPU_MIPSR6
+	.set    mips64r6
+#else
 	.set    mips64r2
+#endif
 	.set    noreorder
 
 	/* Restore an o32 sigcontext.  */

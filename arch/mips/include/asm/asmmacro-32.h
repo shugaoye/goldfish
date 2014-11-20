@@ -12,7 +12,7 @@
 #include <asm/fpregdef.h>
 #include <asm/mipsregs.h>
 
-#ifdef CONFIG_CPU_MIPS32_R2
+#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6)
 
 	/* copy stuff from MIPS64 */
 

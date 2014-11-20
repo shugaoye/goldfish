@@ -204,6 +204,9 @@ static inline unsigned int decode_config0(struct cpuinfo_mips *c)
 		case 1:
 			set_isa(c, MIPS_CPU_ISA_M32R2);
 			break;
+		case 2:
+			c->isa_level = MIPS_CPU_ISA_M32R6;
+			break;
 		default:
 			goto unknown;
 		}
@@ -215,6 +218,9 @@ static inline unsigned int decode_config0(struct cpuinfo_mips *c)
 			break;
 		case 1:
 			set_isa(c, MIPS_CPU_ISA_M64R2);
+			break;
+		case 2:
+			c->isa_level = MIPS_CPU_ISA_M64R6;
 			break;
 		}
 		break;
@@ -324,9 +330,44 @@ static inline unsigned int decode_config4(struct cpuinfo_mips *c, int pass,
 			if (config4 & MIPS_CONF4_TLBINV) {
 				c->options |= MIPS_CPU_TLBINV;
 				printk("TLBINV/F supported, config4=0x%0x\n",config4);
+				if (config4 & MIPS_CONF4_TLBINV_FULL)
+					c->options |= MIPS_CPU_TLBINV_FULL;
 			}
-			/* TBW: page walker support starts here */
 		}
+#ifdef CONFIG_CPU_MIPSR6
+		c->tlbsizevtlb = ((c->tlbsizevtlb - 1) |
+			(((config4 & MIPS_CONF4_VTLBSIZEEXT) >>
+			  MIPS_CONF4_VTLBSIZEEXT_SHIFT) <<
+			 MIPS_CONF1_TLBS_SIZE)) + 1;
+		c->tlbsize = c->tlbsizevtlb;
+
+		newcf4 = (config4 & ~MIPS_CONF4_FTLBPAGESIZE) |
+			((((fls(PAGE_SIZE >> BASIC_PAGE_SHIFT)-1)/2)+1) <<
+			 MIPS_CONF4_FTLBPAGESIZE_SHIFT);
+		write_c0_config4(newcf4);
+		back_to_back_c0_hazard();
+		config4 = read_c0_config4();
+		if (config4 != newcf4) {
+			printk(KERN_ERR "PAGE_SIZE 0x%0lx is not supported by FTLB (config4=0x%0x)\n",
+				PAGE_SIZE, config4);
+			if (conf6available && (cpu_capability & MIPS_FTLB_CAPABLE)) {
+				printk("Switching FTLB OFF\n");
+				config6 = read_c0_config6();
+				write_c0_config6(config6 & ~MIPS_CONF6_FTLBEN);
+			}
+			printk("Total TLB(VTLB) inuse: %d\n",c->tlbsizevtlb);
+		} else {
+			c->tlbsizeftlbsets = 1 <<
+				((config4 & MIPS_CONF4_FTLBSETS) >>
+				 MIPS_CONF4_FTLBSETS_SHIFT);
+			c->tlbsizeftlbways = ((config4 & MIPS_CONF4_FTLBWAYS) >>
+					      MIPS_CONF4_FTLBWAYS_SHIFT) + 2;
+			c->tlbsize += (c->tlbsizeftlbways *
+				       c->tlbsizeftlbsets);
+			printk("V/FTLB found: VTLB=%d, FTLB sets=%d, ways=%d total TLB=%d\n",
+				c->tlbsizevtlb, c->tlbsizeftlbsets, c->tlbsizeftlbways, c->tlbsize);
+		}
+#else
 		switch (config4 & MIPS_CONF4_MMUEXTDEF) {
 		case MIPS_CONF4_MMUEXTDEF_MMUSIZEEXT:
 			c->tlbsize =
@@ -373,6 +414,7 @@ static inline unsigned int decode_config4(struct cpuinfo_mips *c, int pass,
 				c->tlbsizevtlb, c->tlbsizeftlbsets, c->tlbsizeftlbways, c->tlbsize);
 			break;
 		}
+#endif
 	}
 
 	c->kscratch_mask = (config4 >> 16) & 0xff;
@@ -388,6 +430,8 @@ static inline unsigned int decode_config5(struct cpuinfo_mips *c)
 
 	if (config5 & MIPS_CONF5_EVA)
 		c->options |= MIPS_CPU_EVA;
+	if (config5 & MIPS_CONF5_MRP)
+		c->options2 |= MIPS_CPU_MAAR;
 
 	return config5 & MIPS_CONF_M;
 }
@@ -448,8 +492,17 @@ static void decode_configs(struct cpuinfo_mips *c)
 
 	mips_probe_watch_registers(c);
 
-	if (cpu_has_mips_r2)
+	if (cpu_has_mips_r2 || cpu_has_mips_r6)
 		c->core = read_c0_ebase() & 0x3ff;
+
+	if (cpu_has_rixi) {
+		write_c0_pagegrain(read_c0_pagegrain() | PG_IEC);
+		back_to_back_c0_hazard();
+		if (read_c0_pagegrain() & PG_IEC) {
+			c->options |= MIPS_CPU_RIXI_EXCEPT;
+			pr_info("TLBRI/TLBXI exceptions are used\n");
+		}
+	}
 }
 
 #define R4K_OPTS (MIPS_CPU_TLB | MIPS_CPU_4KEX | MIPS_CPU_4K_CACHE \
@@ -1205,7 +1258,7 @@ __cpuinit void cpu_probe(void)
 		}
 	}
 
-	if (cpu_has_mips_r2) {
+	if (cpu_has_mips_r2 || cpu_has_mips_r6) {
 		c->srsets = ((read_c0_srsctl() >> 26) & 0x0f) + 1;
 		/* R2 has Performance Counter Interrupt indicator */
 		c->options |= MIPS_CPU_PCI;

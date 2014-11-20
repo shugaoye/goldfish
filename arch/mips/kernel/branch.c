@@ -204,12 +204,28 @@ int __MIPS16e_compute_return_epc(struct pt_regs *regs)
  *		returns 0 or BRANCH_LIKELY_TAKEN as appropriate after
  *		evaluating the branch.
  */
+/*  Note on R6 compact branches:
+ *      Compact branches doesn't do exception (besides BC1EQZ/BC1NEZ)
+ *      and doesn't execute instruction in Forbidden Slot if branch is
+ *      to be taken. It means that return EPC for them can be safely set
+ *      to EPC + 8 because it is the only case to get a BD precise exception
+ *      doing instruction in Forbidden Slot while no branch.
+ *
+ *      Unconditional compact jump/branches added for full picture
+ *      (not doing BD precise exception, actually).
+ */
 int __compute_return_epc_for_insn(struct pt_regs *regs,
 				   union mips_instruction insn)
 {
-	unsigned int bit, fcr31, dspcontrol;
+	unsigned int bit;
 	long epc = regs->cp0_epc;
 	int ret = 0;
+#ifdef CONFIG_CPU_MIPSR6
+	int reg;
+#else
+	unsigned int fcr31;
+	unsigned dspcontrol;
+#endif
 
 	switch (insn.i_format.opcode) {
 	/*
@@ -220,7 +236,9 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 		case jalr_op:
 			regs->regs[insn.r_format.rd] = epc + 8;
 			/* Fall through */
+#ifndef CONFIG_CPU_MIPSR6
 		case jr_op:
+#endif
 			regs->cp0_epc = regs->regs[insn.r_format.rs];
 			break;
 		}
@@ -234,27 +252,52 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 	case bcond_op:
 		switch (insn.i_format.rt) {
 		case bltz_op:
+#ifndef CONFIG_CPU_MIPSR6
 		case bltzl_op:
+#endif
 			if ((long)regs->regs[insn.i_format.rs] < 0) {
 				epc = epc + 4 + (insn.i_format.simmediate << 2);
+#ifndef CONFIG_CPU_MIPSR6
 				if (insn.i_format.rt == bltzl_op)
 					ret = BRANCH_LIKELY_TAKEN;
+#endif
 			} else
 				epc += 8;
 			regs->cp0_epc = epc;
 			break;
 
 		case bgez_op:
+#ifndef CONFIG_CPU_MIPSR6
 		case bgezl_op:
+#endif
 			if ((long)regs->regs[insn.i_format.rs] >= 0) {
 				epc = epc + 4 + (insn.i_format.simmediate << 2);
+#ifndef CONFIG_CPU_MIPSR6
 				if (insn.i_format.rt == bgezl_op)
 					ret = BRANCH_LIKELY_TAKEN;
+#endif
 			} else
 				epc += 8;
 			regs->cp0_epc = epc;
 			break;
 
+#ifdef CONFIG_CPU_MIPSR6
+		case nal_op:    /* MIPSR6: nal == bltzal $0 */
+			if (insn.i_format.rs)
+				break;
+			regs->regs[31] = epc + 8;
+			epc += 4;
+			regs->cp0_epc = epc;
+			break;
+
+		case bal_op:    /* MIPSR6: bal == bgezal $0 */
+			if (insn.i_format.rs)
+				break;
+			regs->regs[31] = epc + 8;
+			epc = epc + 4 + (insn.i_format.simmediate << 2);
+			regs->cp0_epc = epc;
+			break;
+#else
 		case bltzal_op:
 		case bltzall_op:
 			regs->regs[31] = epc + 8;
@@ -291,6 +334,7 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 				epc += 8;
 			regs->cp0_epc = epc;
 			break;
+#endif
 		}
 		break;
 
@@ -313,31 +357,68 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 	 * These are conditional and in i_format.
 	 */
 	case beq_op:
+#ifndef CONFIG_CPU_MIPSR6
 	case beql_op:
+#endif
 		if (regs->regs[insn.i_format.rs] ==
 		    regs->regs[insn.i_format.rt]) {
 			epc = epc + 4 + (insn.i_format.simmediate << 2);
+#ifndef CONFIG_CPU_MIPSR6
 			if (insn.i_format.opcode == beql_op)
 				ret = BRANCH_LIKELY_TAKEN;
+#endif
 		} else
 			epc += 8;
 		regs->cp0_epc = epc;
 		break;
 
 	case bne_op:
+#ifndef CONFIG_CPU_MIPSR6
 	case bnel_op:
+#endif
 		if (regs->regs[insn.i_format.rs] !=
 		    regs->regs[insn.i_format.rt]) {
 			epc = epc + 4 + (insn.i_format.simmediate << 2);
+#ifndef CONFIG_CPU_MIPSR6
 			if (insn.i_format.opcode == bnel_op)
 				ret = BRANCH_LIKELY_TAKEN;
+#endif
 		} else
 			epc += 8;
 		regs->cp0_epc = epc;
 		break;
 
 	case blez_op: /* not really i_format */
+#ifdef CONFIG_CPU_MIPSR6
+		/*
+		 *  Compact branches: blezalc, bgezalc, bgeuc
+		 */
+		if (insn.i_format.rt) {
+			if ((insn.i_format.rs == insn.i_format.rt) ||
+			    !insn.i_format.rs)   /* blezalc, bgezalc */
+				regs->regs[31] = epc + 4;
+			epc += 8;
+			regs->cp0_epc = epc;
+			break;
+		}
+
+		if ((long)regs->regs[insn.i_format.rs] <= 0) {
+			epc = epc + 4 + (insn.i_format.simmediate << 2);
+		} else
+			epc += 8;
+		regs->cp0_epc = epc;
+		break;
+#endif
 	case blezl_op:
+#ifdef CONFIG_CPU_MIPSR6
+		/*
+		 *  Compact branches: blezc, bgezc, bgec
+		 */
+		epc += 8;
+		regs->cp0_epc = epc;
+
+		break;
+#else
 		/* rt field assumed to be zero */
 		if ((long)regs->regs[insn.i_format.rs] <= 0) {
 			epc = epc + 4 + (insn.i_format.simmediate << 2);
@@ -347,9 +428,39 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 			epc += 8;
 		regs->cp0_epc = epc;
 		break;
+#endif
 
 	case bgtz_op:
+#ifdef CONFIG_CPU_MIPSR6
+		/*
+		 *  Compact branches: bltzalc, bgtzalc, bltuc
+		 */
+		if (insn.i_format.rt) {
+			if ((insn.i_format.rs == insn.i_format.rt) ||
+			    !insn.i_format.rs)   /* bltzalc, bgtzalc */
+				regs->regs[31] = epc + 4;
+			epc += 8;
+			regs->cp0_epc = epc;
+			break;
+		}
+
+		if ((long)regs->regs[insn.i_format.rs] > 0) {
+			epc = epc + 4 + (insn.i_format.simmediate << 2);
+		} else
+			epc += 8;
+		regs->cp0_epc = epc;
+		break;
+#endif
 	case bgtzl_op:
+#ifdef CONFIG_CPU_MIPSR6
+		/*
+		 *  Compact branches: bltc, bltzc, bgtzc
+		 */
+		epc += 8;
+		regs->cp0_epc = epc;
+
+		break;
+#else
 		/* rt field assumed to be zero */
 		if ((long)regs->regs[insn.i_format.rs] > 0) {
 			epc = epc + 4 + (insn.i_format.simmediate << 2);
@@ -360,10 +471,58 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 		regs->cp0_epc = epc;
 		break;
 
+#endif
+
+#ifdef CONFIG_CPU_MIPSR6
+	case cbcond0_op:
+		/*
+		 *  Compact branches: bovc, beqc, beqzalc
+		 */
+
+		/* fall through */
+	case cbcond1_op:
+		/*
+		 *  Compact branches: bnvc, bnec, bnezalc
+		 */
+		if (insn.i_format.rt && !insn.i_format.rs)  /* beqzalc/bnezalc */
+			regs->regs[31] = epc + 4;
+		epc += 8;
+		regs->cp0_epc = epc;
+
+		break;
+#endif
+
 	/*
 	 * And now the FPA/cp1 branch instructions.
 	 */
 	case cop1_op:
+#ifdef CONFIG_CPU_MIPSR6
+		if ((insn.i_format.rs != bc1eqz_op) &&
+		    (insn.i_format.rs != bc1nez_op))
+			break;
+
+		lose_fpu(1);	/* Save FPU state for the emulator. */
+		reg = insn.i_format.rt;
+		bit = 0;
+		switch (insn.i_format.rs) {
+		case bc1eqz_op:
+			if (current->thread.fpu.fpr[reg] == (__u64)0)
+				bit = 1;
+			break;
+		case bc1nez_op:
+			if (current->thread.fpu.fpr[reg] != (__u64)0)
+				bit = 1;
+			break;
+		}
+		own_fpu(1);     /* Restore FPU state. */
+		if (bit)
+			epc = epc + 4 + (insn.i_format.simmediate << 2);
+		else
+			epc += 8;
+		regs->cp0_epc = epc;
+
+		break;
+#else
 		preempt_disable();
 		if (is_fpu_owner())
 			asm volatile("cfc1\t%0,$31" : "=r" (fcr31));
@@ -398,6 +557,39 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 			break;
 		}
 		break;
+#endif
+
+#ifdef CONFIG_CPU_MIPSR6
+	case bc_op:
+		epc += 8;
+		regs->cp0_epc = epc;
+		break;
+
+	case jump_op:
+		if (insn.i_format.rs)   /* beqzc */
+			epc = epc + 8;
+		else                    /* jic, no offset shift */
+			epc = regs->regs[insn.i_format.rt] + insn.i_format.simmediate;
+		regs->cp0_epc = epc;
+		break;
+
+	case balc_op:
+		regs->regs[31] = epc + 4;
+		epc = epc + 4 + (insn.i_format.simmediate << 2);
+		regs->cp0_epc = epc;
+		break;
+
+	case jump2_op:
+		if (insn.i_format.rs)   /* bnezc */
+			epc = epc + 8;
+		else {                  /* jialc, no offset shift */
+			regs->regs[31] = epc + 4;
+			epc = regs->regs[insn.i_format.rt] + insn.i_format.simmediate;
+		}
+		regs->cp0_epc = epc;
+		break;
+#endif
+
 #ifdef CONFIG_CPU_CAVIUM_OCTEON
 	case lwc2_op: /* This is bbit0 on Octeon */
 		if ((regs->regs[insn.i_format.rs] & (1ull<<insn.i_format.rt))
@@ -435,10 +627,12 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 
 	return ret;
 
+#ifndef CONFIG_CPU_MIPSR6
 sigill:
 	printk("%s: DSP branch but not DSP ASE - sending SIGBUS.\n", current->comm);
 	force_sig(SIGBUS, current);
 	return -EFAULT;
+#endif
 }
 EXPORT_SYMBOL_GPL(__compute_return_epc_for_insn);
 

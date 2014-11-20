@@ -279,9 +279,19 @@ static inline int is_jump_ins(union mips_instruction *ip)
 		return 1;
 	if (ip->j_format.opcode == jal_op)
 		return 1;
+#ifdef CONFIG_CPU_MIPSR6
+	if (((ip->i_format.opcode == jump_op) ||   /* jic */
+	     (ip->i_format.opcode == jump2_op)) && /* jialc */
+	    (ip->i_format.rs == 0))
+		return 1;
+	if (ip->r_format.opcode != spec_op)
+		return 0;
+	return ((ip->r_format.func == jalr_op) && !ip->r_format.rt);
+#else
 	if (ip->r_format.opcode != spec_op)
 		return 0;
 	return ip->r_format.func == jalr_op || ip->r_format.func == jr_op;
+#endif
 #endif
 }
 

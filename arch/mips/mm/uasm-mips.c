@@ -39,6 +39,14 @@
 	 | (e) << RE_SH						\
 	 | (f) << FUNC_SH)
 
+/* This macro sets the non-variable bits of an R6 instruction. */
+#define M6(a, b, c, d, f)                                       \
+	((a) << OP_SH						\
+	 | (b) << RS_SH						\
+	 | (c) << RT_SH						\
+	 | (d) << SIMM9_SH                                      \
+	 | (f) << FUNC_SH)
+
 /* Define these when we are not the ISA the kernel is being compiled with. */
 #ifdef CONFIG_CPU_MICROMIPS
 #define CL_uasm_i_b(buf, off) ISAOPC(_beq)(buf, 0, 0, off)
@@ -54,8 +62,10 @@ static struct insn insn_table[] __uasminitdata = {
 	{ insn_addu, M(spec_op, 0, 0, 0, 0, addu_op), RS | RT | RD },
 	{ insn_andi, M(andi_op, 0, 0, 0, 0, 0), RS | RT | UIMM },
 	{ insn_and, M(spec_op, 0, 0, 0, 0, and_op), RS | RT | RD },
+#ifndef CONFIG_CPU_MIPSR6
 	{ insn_bbit0, M(lwc2_op, 0, 0, 0, 0, 0), RS | RT | BIMM },
 	{ insn_bbit1, M(swc2_op, 0, 0, 0, 0, 0), RS | RT | BIMM },
+#endif
 	{ insn_beql, M(beql_op, 0, 0, 0, 0, 0), RS | RT | BIMM },
 	{ insn_beq, M(beq_op, 0, 0, 0, 0, 0), RS | RT | BIMM },
 	{ insn_bgezl, M(bcond_op, 0, bgezl_op, 0, 0, 0), RS | BIMM },
@@ -63,7 +73,11 @@ static struct insn insn_table[] __uasminitdata = {
 	{ insn_bltzl, M(bcond_op, 0, bltzl_op, 0, 0, 0), RS | BIMM },
 	{ insn_bltz, M(bcond_op, 0, bltz_op, 0, 0, 0), RS | BIMM },
 	{ insn_bne, M(bne_op, 0, 0, 0, 0, 0), RS | RT | BIMM },
+#ifdef CONFIG_CPU_MIPSR6
+	{ insn_cache,  M6(cache_op, 0, 0, 0, cache6_op),  RS | RT | SIMM9 },
+#else
 	{ insn_cache,  M(cache_op, 0, 0, 0, 0, 0),  RS | RT | SIMM },
+#endif
 	{ insn_daddiu, M(daddiu_op, 0, 0, 0, 0, 0), RS | RT | SIMM },
 	{ insn_daddu, M(spec_op, 0, 0, 0, 0, daddu_op), RS | RT | RD },
 	{ insn_dinsm, M(spec3_op, 0, 0, 0, 0, dinsm_op), RS | RT | RD | RE },
@@ -84,11 +98,20 @@ static struct insn insn_table[] __uasminitdata = {
 	{ insn_j,  M(j_op, 0, 0, 0, 0, 0),  JIMM },
 	{ insn_jal,  M(jal_op, 0, 0, 0, 0, 0),	JIMM },
 	{ insn_j,  M(j_op, 0, 0, 0, 0, 0),  JIMM },
+#ifdef CONFIG_CPU_MIPSR6
+	{ insn_jr,  M(spec_op, 0, 0, 0, 0, jalr_op),  RS },
+#else
 	{ insn_jr,  M(spec_op, 0, 0, 0, 0, jr_op),  RS },
+#endif
 	{ insn_ld,  M(ld_op, 0, 0, 0, 0, 0),  RS | RT | SIMM },
 	{ insn_ldx, M(spec3_op, 0, 0, 0, ldx_op, lx_op), RS | RT | RD },
+#ifdef CONFIG_CPU_MIPSR6
+	{ insn_lld,  M6(spec3_op, 0, 0, 0, lld6_op),  RS | RT | SIMM9 },
+	{ insn_ll,  M6(spec3_op, 0, 0, 0, ll6_op),  RS | RT | SIMM9 },
+#else
 	{ insn_lld,  M(lld_op, 0, 0, 0, 0, 0),	RS | RT | SIMM },
 	{ insn_ll,  M(ll_op, 0, 0, 0, 0, 0),  RS | RT | SIMM },
+#endif
 	{ insn_lui,  M(lui_op, 0, 0, 0, 0, 0),	RT | SIMM },
 	{ insn_lw,  M(lw_op, 0, 0, 0, 0, 0),  RS | RT | SIMM },
 	{ insn_lwx, M(spec3_op, 0, 0, 0, lwx_op, lx_op), RS | RT | RD },
@@ -96,11 +119,20 @@ static struct insn insn_table[] __uasminitdata = {
 	{ insn_mtc0,  M(cop0_op, mtc_op, 0, 0, 0, 0),  RT | RD | SET},
 	{ insn_ori,  M(ori_op, 0, 0, 0, 0, 0),	RS | RT | UIMM },
 	{ insn_or,  M(spec_op, 0, 0, 0, 0, or_op),  RS | RT | RD },
+#ifdef CONFIG_CPU_MIPSR6
+	{ insn_pref,  M6(spec3_op, 0, 0, 0, pref6_op),  RS | RT | SIMM9 },
+#else
 	{ insn_pref,  M(pref_op, 0, 0, 0, 0, 0),  RS | RT | SIMM },
+#endif
 	{ insn_rfe,  M(cop0_op, cop_op, 0, 0, 0, rfe_op),  0 },
 	{ insn_rotr,  M(spec_op, 1, 0, 0, 0, srl_op),  RT | RD | RE },
+#ifdef CONFIG_CPU_MIPSR6
+	{ insn_scd,  M6(spec3_op, 0, 0, 0, scd6_op),  RS | RT | SIMM9 },
+	{ insn_sc,  M6(spec3_op, 0, 0, 0, sc6_op),  RS | RT | SIMM9 },
+#else
 	{ insn_scd,  M(scd_op, 0, 0, 0, 0, 0),	RS | RT | SIMM },
 	{ insn_sc,  M(sc_op, 0, 0, 0, 0, 0),  RS | RT | SIMM },
+#endif
 	{ insn_sd,  M(sd_op, 0, 0, 0, 0, 0),  RS | RT | SIMM },
 	{ insn_sll,  M(spec_op, 0, 0, 0, 0, sll_op),  RT | RD | RE },
 	{ insn_sra,  M(spec_op, 0, 0, 0, 0, sra_op),  RT | RD | RE },
@@ -135,6 +167,14 @@ static inline __uasminit u32 build_jimm(u32 arg)
 	     KERN_WARNING "Micro-assembler field overflow\n");
 
 	return (arg >> 2) & JIMM_MASK;
+}
+
+static inline __uasminit u32 build_simm9(s32 arg)
+{
+	WARN(((arg > 0xff) || (arg < -0x100)),
+	     KERN_WARNING "Micro-assembler field overflow\n");
+
+	return (arg & SIMM9_MASK) << SIMM9_SH;
 }
 
 /*
@@ -181,6 +221,8 @@ static void __uasminit build_insn(u32 **buf, enum opcode opc, ...)
 		op |= build_set(va_arg(ap, u32));
 	if (ip->fields & SCIMM)
 		op |= build_scimm(va_arg(ap, u32));
+	if (ip->fields & SIMM9)
+		op |= build_simm9(va_arg(ap, u32));
 	va_end(ap);
 
 	**buf = op;

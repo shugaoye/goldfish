@@ -301,11 +301,14 @@ enum cpu_type_enum {
 #define MIPS_CPU_ISA_M32R2	0x00000040
 #define MIPS_CPU_ISA_M64R1	0x00000080
 #define MIPS_CPU_ISA_M64R2	0x00000100
+#define MIPS_CPU_ISA_M32R6      0x00000200
+#define MIPS_CPU_ISA_M64R6      0x00000400
 
 #define MIPS_CPU_ISA_32BIT (MIPS_CPU_ISA_I | MIPS_CPU_ISA_II | \
-	MIPS_CPU_ISA_M32R1 | MIPS_CPU_ISA_M32R2)
+	MIPS_CPU_ISA_M32R1 | MIPS_CPU_ISA_M32R2 |MIPS_CPU_ISA_M32R6)
 #define MIPS_CPU_ISA_64BIT (MIPS_CPU_ISA_III | MIPS_CPU_ISA_IV | \
-	MIPS_CPU_ISA_V | MIPS_CPU_ISA_M64R1 | MIPS_CPU_ISA_M64R2)
+	MIPS_CPU_ISA_V | MIPS_CPU_ISA_M64R1 | MIPS_CPU_ISA_M64R2 | \
+	MIPS_CPU_ISA_M64R6)
 
 /*
  * CPU Option encodings
@@ -340,6 +343,13 @@ enum cpu_type_enum {
 #define MIPS_CPU_TLBINV         0x08000000 /* CPU supports TLBINV/F */
 #define MIPS_CPU_CM2            0x10000000 /* CPU has CM2 */
 #define MIPS_CPU_CM2_L2SYNC     0x20000000 /* CPU has CM2 L2-only SYNC feature */
+#define MIPS_CPU_TLBINV_FULL    0x40000000 /* CPU supports single TLBINV/F for full V/FTLB */
+#define MIPS_CPU_RIXI_EXCEPT    0x80000000 /* CPU has TLB Read/eXec Inhibit exceptions */
+
+/*
+ * CPU Option2 encodings
+ */
+#define MIPS_CPU_MAAR           0x00000001      /* MAAR exists */
 
 /*
  * CPU ASE encodings

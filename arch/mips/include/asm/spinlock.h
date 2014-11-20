@@ -238,6 +238,23 @@ static inline void arch_read_lock(arch_rwlock_t *rw)
 		: "m" (rw->lock)
 		: "memory");
 	} else {
+#ifdef CONFIG_CPU_MIPSR6
+		unsigned long tmp2 = (unsigned long)&(rw->lock);
+
+		do {
+			__asm__ __volatile__(
+			"       .set    push                            \n"
+			"       .set    noreorder   # arch_read_lock    \n"
+			"1:     ll      %0, 0(%1)                       \n"
+			"       bltz    %0, 1b                          \n"
+			"        addu   %0, 1                           \n"
+			"2:     sc      %0, 0(%1)                       \n"
+			"       .set    pop                             \n"
+			: "=&r" (tmp)
+			: "r" (tmp2)
+			: "memory");
+		} while (unlikely(!tmp));
+#else
 		do {
 			__asm__ __volatile__(
 			"1:	ll	%1, %2	# arch_read_lock	\n"
@@ -248,6 +265,7 @@ static inline void arch_read_lock(arch_rwlock_t *rw)
 			: "m" (rw->lock)
 			: "memory");
 		} while (unlikely(!tmp));
+#endif
 	}
 
 	smp_llsc_mb();
@@ -272,6 +290,23 @@ static inline void arch_read_unlock(arch_rwlock_t *rw)
 		: "m" (rw->lock)
 		: "memory");
 	} else {
+#ifdef CONFIG_CPU_MIPSR6
+		unsigned long tmp2 = (unsigned long)&(rw->lock);
+
+		do {
+			__asm__ __volatile__(
+			"       .set    push                            \n"
+			"       .set    noat                            \n"
+			"1:     ll      %0, 0(%1)   # arch_read_unlock  \n"
+			"       li      $1, 1                           \n"
+			"       sub     %0, %0, $1                      \n"
+			"       sc      %0, 0(%1)                       \n"
+			"       .set    pop                             \n"
+			: "=&r" (tmp)
+			: "r" (tmp2)
+			: "memory");
+		} while (unlikely(!tmp));
+#else
 		do {
 			__asm__ __volatile__(
 			"1:	ll	%1, %2	# arch_read_unlock	\n"
@@ -281,6 +316,7 @@ static inline void arch_read_unlock(arch_rwlock_t *rw)
 			: "m" (rw->lock)
 			: "memory");
 		} while (unlikely(!tmp));
+#endif
 	}
 }
 
@@ -302,6 +338,23 @@ static inline void arch_write_lock(arch_rwlock_t *rw)
 		: "m" (rw->lock)
 		: "memory");
 	} else {
+#ifdef CONFIG_CPU_MIPSR6
+		unsigned long tmp2 = (unsigned long)&(rw->lock);
+
+		do {
+			__asm__ __volatile__(
+			"       .set    push                            \n"
+			"       .set    noreorder   # arch_write_lock   \n"
+			"1:     ll      %0, 0(%1)                       \n"
+			"       bnez    %0, 1b                          \n"
+			"        lui    %0, 0x8000                      \n"
+			"2:     sc      %0, 0(%1)                       \n"
+			"       .set    pop                             \n"
+			: "=&r" (tmp)
+			: "r" (tmp2)
+			: "memory");
+		} while (unlikely(!tmp));
+#else
 		do {
 			__asm__ __volatile__(
 			"1:	ll	%1, %2	# arch_write_lock	\n"
@@ -312,6 +365,7 @@ static inline void arch_write_lock(arch_rwlock_t *rw)
 			: "m" (rw->lock)
 			: "memory");
 		} while (unlikely(!tmp));
+#endif
 	}
 
 	smp_llsc_mb();
@@ -352,6 +406,26 @@ static inline int arch_read_trylock(arch_rwlock_t *rw)
 		: "m" (rw->lock)
 		: "memory");
 	} else {
+#ifdef CONFIG_CPU_MIPSR6
+		unsigned long tmp2 = (unsigned long)&(rw->lock);
+
+		__asm__ __volatile__(
+		"	.set	noreorder	# arch_read_trylock	\n"
+		"       li      %1, 0                                   \n"
+		"1:     ll      %0, 0(%2)                               \n"
+		"       bltz    %0, 2f                                  \n"
+		"        addu   %0, 1                                   \n"
+		"       sc      %0, 0(%2)                               \n"
+		"       beqz    %0, 1b                                  \n"
+		"	 nop						\n"
+		"	.set	reorder					\n"
+		__WEAK_LLSC_MB
+		"	li	%2, 1					\n"
+		"2:							\n"
+		: "=&r" (tmp), "=&r" (ret)
+		: "r" (tmp2)
+		: "memory");
+#else
 		__asm__ __volatile__(
 		"	.set	noreorder	# arch_read_trylock	\n"
 		"	li	%2, 0					\n"
@@ -368,6 +442,7 @@ static inline int arch_read_trylock(arch_rwlock_t *rw)
 		: "=m" (rw->lock), "=&r" (tmp), "=&r" (ret)
 		: "m" (rw->lock)
 		: "memory");
+#endif
 	}
 
 	return ret;
@@ -396,6 +471,26 @@ static inline int arch_write_trylock(arch_rwlock_t *rw)
 		: "m" (rw->lock)
 		: "memory");
 	} else {
+#ifdef CONFIG_CPU_MIPSR6
+		unsigned long tmp2 = (unsigned long)&(rw->lock);
+
+		do {
+			__asm__ __volatile__(
+			"       .set    push                            \n"
+			"       .set    reorder                         \n"
+			"1:     ll      %0, 0(%2)                       \n"
+			"       li      %1, 0   # arch_write_trylock    \n"
+			"       bnez    %0, 2f                          \n"
+			"       lui     %0, 0x8000                      \n"
+			"       sc      %0, 0(%2)                       \n"
+			"       li      %1, 1                           \n"
+			"2:                                             \n"
+			"       .set    pop                             \n"
+			: "=&r" (tmp), "=&r" (ret)
+			: "r" (tmp2)
+			: "memory");
+		} while (unlikely(!tmp));
+#else
 		do {
 			__asm__ __volatile__(
 			"	ll	%1, %3	# arch_write_trylock	\n"
@@ -409,6 +504,7 @@ static inline int arch_write_trylock(arch_rwlock_t *rw)
 			: "m" (rw->lock)
 			: "memory");
 		} while (unlikely(!tmp));
+#endif
 
 		smp_llsc_mb();
 	}

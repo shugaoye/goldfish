@@ -313,8 +313,10 @@ config MIPS_MALTA
 	select SYS_HAS_CPU_MIPS32_R1
 	select SYS_HAS_CPU_MIPS32_R2
 	select SYS_HAS_CPU_MIPS32_R2_EVA
+	select SYS_HAS_CPU_MIPS32_R6
 	select SYS_HAS_CPU_MIPS64_R1
 	select SYS_HAS_CPU_MIPS64_R2
+	select SYS_HAS_CPU_MIPS64_R6
 	select SYS_HAS_CPU_NEVADA
 	select SYS_HAS_CPU_RM7000
 	select SYS_HAS_EARLY_PRINTK
@@ -1276,6 +1278,28 @@ config CPU_MIPS64_R2
 	  specific type of processor in your system, choose those that one
 	  otherwise CPU_MIPS64_R1 is a safe bet for any MIPS64 system.
 
+config CPU_MIPS32_R6
+	bool "MIPS32 Release 6"
+	depends on SYS_HAS_CPU_MIPS32_R6
+	select CPU_HAS_PREFETCH
+	select CPU_SUPPORTS_32BIT_KERNEL
+	select CPU_SUPPORTS_HIGHMEM
+	help
+	  Choose this option to build a kernel for release 6 or later of the
+	  MIPS32 architecture.
+
+config CPU_MIPS64_R6
+	bool "MIPS64 Release 6"
+	depends on SYS_HAS_CPU_MIPS64_R6
+	select CPU_HAS_PREFETCH
+	select CPU_SUPPORTS_32BIT_KERNEL
+	select CPU_SUPPORTS_64BIT_KERNEL
+	select CPU_SUPPORTS_HIGHMEM
+	select CPU_SUPPORTS_HUGEPAGES
+	help
+	  Choose this option to build a kernel for release 6 or later of the
+	  MIPS64 architecture.
+
 config CPU_R3000
 	bool "R3000"
 	depends on SYS_HAS_CPU_R3000
@@ -1625,6 +1649,12 @@ config SYS_HAS_CPU_MIPS64_R1
 config SYS_HAS_CPU_MIPS64_R2
 	bool
 
+config SYS_HAS_CPU_MIPS32_R6
+	bool
+
+config SYS_HAS_CPU_MIPS64_R6
+	bool
+
 config SYS_HAS_CPU_R3000
 	bool
 
@@ -1711,11 +1741,11 @@ endmenu
 #
 config CPU_MIPS32
 	bool
-	default y if CPU_MIPS32_R1 || CPU_MIPS32_R2
+	default y if CPU_MIPS32_R1 || CPU_MIPS32_R2 || CPU_MIPS32_R6
 
 config CPU_MIPS64
 	bool
-	default y if CPU_MIPS64_R1 || CPU_MIPS64_R2
+	default y if CPU_MIPS64_R1 || CPU_MIPS64_R2 || CPU_MIPS64_R6
 
 #
 # These two indicate the revision of the architecture, either Release 1 or Release 2
@@ -1727,6 +1757,14 @@ config CPU_MIPSR1
 config CPU_MIPSR2
 	bool
 	default y if CPU_MIPS32_R2 || CPU_MIPS64_R2 || CPU_CAVIUM_OCTEON
+
+config GENERIC_CSUM
+	bool
+
+config CPU_MIPSR6
+	bool
+	default y if CPU_MIPS64_R6 || CPU_MIPS32_R6
+	select GENERIC_CSUM
 
 config EVA
 	bool
@@ -1756,7 +1794,7 @@ config MIPS_PGD_C0_CONTEXT
 #
 config HARDWARE_WATCHPOINTS
        bool
-       default y if CPU_MIPSR1 || CPU_MIPSR2
+       default y if CPU_MIPSR1 || CPU_MIPSR2 || CPU_MIPSR6
 
 menu "Kernel type"
 
@@ -1960,6 +1998,7 @@ config MIPS_MT_SMTC
 	depends on CPU_MIPS32_R2
 	#depends on CPU_MIPS64_R2		# once there is hardware ...
 	depends on SYS_SUPPORTS_MULTITHREADING
+	depends on !CPU_MIPSR6
 	select CPU_MIPSR2_IRQ_VI
 	select CPU_MIPSR2_IRQ_EI
 	select MIPS_MT

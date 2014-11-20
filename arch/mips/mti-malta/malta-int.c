@@ -201,7 +201,11 @@ static inline int clz(unsigned long x)
 {
 	__asm__(
 	"	.set	push					\n"
+#ifdef CONFIG_CPU_MIPSR6
+	"       .set    mips64r6                                \n"
+#else
 	"	.set	mips32					\n"
+#endif
 	"	clz	%0, %1					\n"
 	"	.set	pop					\n"
 	: "=r" (x)

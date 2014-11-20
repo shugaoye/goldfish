@@ -129,6 +129,12 @@
 #define GCMP_GCB_GAOR2MASK_OFS            0x0218  /* Attribute-Only Region2 Mask */
 #define GCMP_GCB_GAOR3BA_OFS              0x0220  /* Attribute-Only Region3 Base Address */
 #define GCMP_GCB_GAOR3MASK_OFS            0x0228  /* Attribute-Only Region3 Mask */
+#define GCMP_GCB_GCML2P_OFS               0x0300  /* L2 Prefetch Control */
+#define  GCMP_GCB_GCML2P_PAGE_MASK          0xfffff000  /* ... page mask */
+#define  GCMP_GCB_GCML2P_PFTEN              0x00000100  /* L2 Prefetch Enable */
+#define  GCMP_GCB_GCML2P_NPFT               0x000000ff  /* N.of L2 Prefetch  */
+#define GCMP_GCB_GCML2PB_OFS              0x0308  /* L2 Prefetch Control B */
+#define  GCMP_GCB_GCML2PB_CODE_PFTEN        0x00000100  /* L2 Code Prefetch Enable */
 
 /* Core local/Core other control block registers */
 #define GCMP_CCB_RESETR_OFS		0x0000			/* Reset Release */

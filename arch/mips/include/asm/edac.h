@@ -18,14 +18,17 @@ static inline void atomic_scrub(void *va, u32 size)
 		 */
 
 		__asm__ __volatile__ (
+#ifdef CONFIG_CPU_MIPSR6
+		"       .set    mips64r6                                \n"
+#else
 		"	.set	mips2					\n"
+#endif
 		"1:	ll	%0, %1		# atomic_scrub		\n"
 		"	addu	%0, $0					\n"
 		"	sc	%0, %1					\n"
 		"	beqz	%0, 1b					\n"
 		"	.set	mips0					\n"
-		: "=&r" (temp), "=m" (*virt_addr)
-		: "m" (*virt_addr));
+		: "=&r" (temp), "+m" (*virt_addr));
 
 		virt_addr++;
 	}

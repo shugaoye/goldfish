@@ -26,6 +26,7 @@ static char *mtypes[3] = {
 	"Dont use memory",
 	"YAMON PROM memory",
 	"Free memmory",
+	"Memory in use",
 };
 #endif
 
@@ -133,7 +134,7 @@ static inline fw_memblock_t * __init prom_getmdesc(void)
 	mdesc[2].base = mdesc[0].base + 0x000f0000UL;
 	mdesc[2].size = 0x00010000;
 
-	mdesc[3].type = fw_dontuse;
+	mdesc[3].type = fw_inuse;
 	mdesc[3].base = mdesc[0].base + 0x00100000UL;
 	mdesc[3].size = CPHYSADDR(PFN_ALIGN((unsigned long)&_end)) - 0x00100000UL;
 
@@ -184,6 +185,8 @@ static int __init fw_memtype_classify(unsigned int type)
 		return BOOT_MEM_RAM;
 	case fw_code:
 		return BOOT_MEM_ROM_DATA;
+	case fw_inuse:
+		return BOOT_MEM_INUSE;
 	default:
 		return BOOT_MEM_RESERVED;
 	}

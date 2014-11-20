@@ -212,6 +212,10 @@ static void cmp_init_secondary(void)
 	c->tc_id  = (read_c0_tcbind() & TCBIND_CURTC) >> TCBIND_CURTC_SHIFT;
 #endif
 
+#ifdef CONFIG_CPU_MIPSR6
+	pr_info("BEVVA = %lx\n", read_c0_bevva());
+#endif
+
 #ifdef CONFIG_EVA
 	if (gcmp_present)
 		BEV_overlay_segment();
@@ -337,7 +341,8 @@ int __init gcmp_probe(unsigned long addr, unsigned long size)
 	if (gcmp_present >= 0)
 		return gcmp_present;
 
-	if (cpu_has_mips_r2 && (read_c0_config3() & MIPS_CONF3_CMGCR)) {
+	if ((cpu_has_mips_r2 || cpu_has_mips_r6) &&
+	    (read_c0_config3() & MIPS_CONF3_CMGCR)) {
 		/* try CMGCRBase */
 		confaddr = read_c0_cmgcrbase() << 4;
 		_gcmp_base = (unsigned long) ioremap_nocache(confaddr, size);
@@ -374,6 +379,16 @@ int __init gcmp_probe(unsigned long addr, unsigned long size)
 			GCMPGCB(GCML2S) = (confaddr + 0x8000) | GCMP_GCB_GCML2S_EN_MSK;
 			cpu_data[0].options |= MIPS_CPU_CM2_L2SYNC;
 			printk("L2-only SYNC available\n");
+		}
+		if (cpu_has_cm2) {
+			unsigned int l2p;
+
+			l2p = GCMPGCB(GCML2P);
+			if (l2p & GCMP_GCB_GCML2P_NPFT) {
+				GCMPGCB(GCML2P) = (l2p & ~GCMP_GCB_GCML2P_PAGE_MASK) |
+					PAGE_MASK | GCMP_GCB_GCML2P_PFTEN;
+				GCMPGCB(GCML2PB) |= GCMP_GCB_GCML2PB_CODE_PFTEN;
+			}
 		}
 		return gcmp_present;
 	}

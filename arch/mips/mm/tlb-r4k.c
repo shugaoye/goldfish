@@ -68,12 +68,24 @@ extern void build_tlb_refill_handler(void);
 
 #endif
 
+int lowest_wired;
+int current_wired;
+static struct WiredEntry {
+	unsigned long   EntryHi;
+	unsigned long   EntryLo0;
+	unsigned long   EntryLo1;
+	unsigned long   PageMask;
+} wired_entry_array[64];
+
+
 void local_flush_tlb_all(void)
 {
 	unsigned long flags;
 	unsigned long old_ctx;
+	unsigned long old_pagemask;
 	int entry;
 	int ftlbhighset;
+	int wired;
 
 	ENTER_CRITICAL(flags);
 	/* Save old context and create impossible VPN2 value */
@@ -81,23 +93,41 @@ void local_flush_tlb_all(void)
 	write_c0_entrylo0(0);
 	write_c0_entrylo1(0);
 
-	entry = read_c0_wired();
+	entry = read_c0_wired() & 0xffff;
 
 	/* Blast 'em all away. */
 	if (cpu_has_tlbinv) {
-		if (current_cpu_data.tlbsizevtlb) {
-			write_c0_index(0);
-			mtc0_tlbw_hazard();
-			tlbinvf();  /* invalide VTLB */
+		old_pagemask = read_c0_pagemask();
+		if (cpu_has_tlbinv_full)
+			tlbinvf();  /* invalide whole V/FTLB, index isn't used */
+		else {
+			if (current_cpu_data.tlbsizevtlb) {
+				write_c0_index(0);
+				mtc0_tlbw_hazard();
+				tlbinvf();  /* invalide VTLB */
+			}
+			ftlbhighset = current_cpu_data.tlbsizevtlb + current_cpu_data.tlbsizeftlbsets;
+			for (entry=current_cpu_data.tlbsizevtlb;
+			     entry < ftlbhighset;
+			     entry++) {
+				write_c0_index(entry);
+				mtc0_tlbw_hazard();
+				tlbinvf();  /* invalide one FTLB set */
+			}
 		}
-		ftlbhighset = current_cpu_data.tlbsizevtlb + current_cpu_data.tlbsizeftlbsets;
-		for (entry=current_cpu_data.tlbsizevtlb;
-		     entry < ftlbhighset;
-		     entry++) {
-			write_c0_index(entry);
+		/* restore wired entries */
+		for (wired = lowest_wired; wired < current_wired; wired++) {
+			write_c0_index(wired);
+			tlbw_use_hazard();      /* What is the hazard here? */
+			write_c0_pagemask(wired_entry_array[wired].PageMask);
+			write_c0_entryhi(wired_entry_array[wired].EntryHi);
+			write_c0_entrylo0(wired_entry_array[wired].EntryLo0);
+			write_c0_entrylo1(wired_entry_array[wired].EntryLo1);
 			mtc0_tlbw_hazard();
-			tlbinvf();  /* invalide one FTLB set */
+			tlb_write_indexed();
+			tlbw_use_hazard();
 		}
+		write_c0_pagemask(old_pagemask);
 	} else
 		while (entry < current_cpu_data.tlbsize) {
 			/* Make sure all entries differ. */
@@ -109,6 +139,7 @@ void local_flush_tlb_all(void)
 		}
 	tlbw_use_hazard();
 	write_c0_entryhi(old_ctx);
+	mtc0_tlbw_hazard();
 	FLUSH_ITLB;
 	EXIT_CRITICAL(flags);
 }
@@ -357,6 +388,32 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 	EXIT_CRITICAL(flags);
 }
 
+int wired_push(unsigned long entryhi, unsigned long entrylo0,
+	       unsigned long entrylo1, unsigned long pagemask)
+{
+	if (current_wired >= current_cpu_data.tlbsizevtlb) {
+		printk("Attempt to push TLB into wired exceeding VTLV size\n");
+		BUG();
+	}
+
+	wired_entry_array[current_wired].EntryHi = entryhi;
+	wired_entry_array[current_wired].EntryLo0 = entrylo0;
+	wired_entry_array[current_wired].EntryLo1 = entrylo1;
+	wired_entry_array[current_wired].PageMask = pagemask;
+
+	return(current_wired++);
+}
+
+int wired_pop(void)
+{
+	if (current_wired <= lowest_wired) {
+		printk("Attempt to delete a not existed wired TLB\n");
+		BUG();
+	}
+
+	return(--current_wired);
+}
+
 void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 		     unsigned long entryhi, unsigned long pagemask)
 {
@@ -369,7 +426,7 @@ void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 	/* Save old context and create impossible VPN2 value */
 	old_ctx = read_c0_entryhi();
 	old_pagemask = read_c0_pagemask();
-	wired = read_c0_wired();
+	wired = read_c0_wired() & 0xffff;
 	write_c0_wired(wired + 1);
 	write_c0_index(wired);
 	tlbw_use_hazard();	/* What is the hazard here? */
@@ -378,13 +435,42 @@ void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 	write_c0_entrylo0(entrylo0);
 	write_c0_entrylo1(entrylo1);
 	mtc0_tlbw_hazard();
+	wired_push(entryhi,entrylo0,entrylo1,PM_DEFAULT_MASK);
 	tlb_write_indexed();
 	tlbw_use_hazard();
 
 	write_c0_entryhi(old_ctx);
-	tlbw_use_hazard();	/* What is the hazard here? */
 	write_c0_pagemask(old_pagemask);
-	local_flush_tlb_all();
+	mtc0_tlbw_hazard();
+	EXIT_CRITICAL(flags);
+}
+
+void remove_wired_entry(void)
+{
+	unsigned long flags;
+	unsigned long wired;
+	unsigned long old_pagemask;
+	unsigned long old_ctx;
+
+	ENTER_CRITICAL(flags);
+	/* Save old context and create impossible VPN2 value */
+	old_ctx = read_c0_entryhi();
+	old_pagemask = read_c0_pagemask();
+	wired = read_c0_wired() & 0xffff;
+	write_c0_index(wired);
+	tlbw_use_hazard();	/* What is the hazard here? */
+	write_c0_pagemask(PM_DEFAULT_MASK);
+	write_c0_entryhi(UNIQUE_ENTRYHI(wired));
+	write_c0_entrylo0(0);
+	write_c0_entrylo1(0);
+	mtc0_tlbw_hazard();
+	wired_pop();
+	tlb_write_indexed();
+	tlbw_use_hazard();
+
+	write_c0_entryhi(old_ctx);
+	write_c0_pagemask(old_pagemask);
+	mtc0_tlbw_hazard();
 	EXIT_CRITICAL(flags);
 }
 
@@ -400,6 +486,7 @@ int __init has_transparent_hugepage(void)
 	back_to_back_c0_hazard();
 	mask = read_c0_pagemask();
 	write_c0_pagemask(PM_DEFAULT_MASK);
+	mtc0_tlbw_hazard();
 
 	EXIT_CRITICAL(flags);
 
@@ -444,6 +531,7 @@ void __cpuinit tlb_init(void)
 #endif
 		write_c0_pagegrain(pg);
 	}
+	mtc0_tlbw_hazard();
 
 	/* From this point on the ARC firmware is dead.	 */
 	local_flush_tlb_all();
@@ -455,7 +543,10 @@ void __cpuinit tlb_init(void)
 			int wired = current_cpu_data.tlbsize - ntlb;
 			write_c0_wired(wired);
 			write_c0_index(wired-1);
+			mtc0_tlbw_hazard();
 			printk("Restricting TLB to %d entries\n", ntlb);
+			current_wired = wired;
+			lowest_wired = wired;
 		} else
 			printk("Ignoring invalid argument ntlb=%d\n", ntlb);
 	}

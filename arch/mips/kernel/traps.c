@@ -1218,14 +1218,34 @@ asmlinkage void do_watch(struct pt_regs *regs)
 	}
 }
 
+#ifdef CONFIG_CPU_MIPSR6
+char *mcheck_code[32] = { "non R6 multiple hit in TLB: Status.TS = 1",
+			  "multiple hit in TLB",
+			  "multiple hit in TLB, speculative access",
+			  "page size mismatch, unsupported FTLB page mask",
+			  "index doesn't match EntryHI.VPN2 position in FTLB",
+			  "HW PageTableWalker: Valid bits mismatch in PTE pair on directory level",
+			  "HW PageTableWalker: Dual page mode is not implemented"
+			};
+#endif
+
 asmlinkage void do_mcheck(struct pt_regs *regs)
 {
 	const int field = 2 * sizeof(unsigned long);
 	int multi_match = regs->cp0_status & ST0_TS;
+#ifdef CONFIG_CPU_MIPSR6
+	int code = 0;
+#endif
 
 	show_regs(regs);
 
+#ifdef CONFIG_CPU_MIPSR6
+	if (multi_match || (code = read_c0_pagegrain() & PG_MCCAUSE)) {
+		printk("PageGrain: %0x\n", read_c0_pagegrain());
+		printk("BadVAddr: %0*lx\n", field, read_c0_badvaddr());
+#else
 	if (multi_match) {
+#endif
 		printk("Index	: %0x\n", read_c0_index());
 		printk("Pagemask: %0x\n", read_c0_pagemask());
 		printk("EntryHi : %0*lx\n", field, read_c0_entryhi());
@@ -1237,6 +1257,9 @@ asmlinkage void do_mcheck(struct pt_regs *regs)
 
 	show_code((unsigned int __user *) regs->cp0_epc);
 
+#ifdef CONFIG_CPU_MIPSR6
+	panic("Caught Machine Check exception - %s",mcheck_code[code]);
+#else
 	/*
 	 * Some chips may have other causes of machine check (e.g. SB1
 	 * graduation timer)
@@ -1244,6 +1267,7 @@ asmlinkage void do_mcheck(struct pt_regs *regs)
 	panic("Caught Machine Check exception - %scaused by multiple "
 	      "matching entries in the TLB.",
 	      (multi_match) ? "" : "not ");
+#endif
 }
 
 asmlinkage void do_mt(struct pt_regs *regs)
@@ -1782,7 +1806,7 @@ void __cpuinit per_cpu_trap_init(bool is_boot_cpu)
 	change_c0_status(ST0_CU|ST0_MX|ST0_RE|ST0_BEV|ST0_TS|ST0_KX|ST0_SX|ST0_UX,
 			 status_set);
 
-	if (cpu_has_mips_r2)
+	if (cpu_has_mips_r2 || cpu_has_mips_r6)
 		hwrena |= 0x0000000f;
 
 	if (!noulri && cpu_has_userlocal)
@@ -1821,7 +1845,7 @@ void __cpuinit per_cpu_trap_init(bool is_boot_cpu)
 	 *  o read IntCtl.IPTI to determine the timer interrupt
 	 *  o read IntCtl.IPPCI to determine the performance counter interrupt
 	 */
-	if (cpu_has_mips_r2) {
+	if (cpu_has_mips_r2 || cpu_has_mips_r6) {
 		cp0_compare_irq_shift = CAUSEB_TI - CAUSEB_IP;
 		cp0_compare_irq = (read_c0_intctl() >> INTCTLB_IPTI) & 7;
 		cp0_perfcount_irq = (read_c0_intctl() >> INTCTLB_IPPCI) & 7;
@@ -1904,6 +1928,8 @@ static int __init set_rdhwr_noopt(char *str)
 
 __setup("rdhwr_noopt", set_rdhwr_noopt);
 
+extern void tlb_do_page_fault_0(void);
+
 void __init trap_init(void)
 {
 	extern char except_vec3_generic;
@@ -1925,11 +1951,11 @@ void __init trap_init(void)
 	} else {
 #ifdef CONFIG_KVM_GUEST
 #define KVM_GUEST_KSEG0     0x40000000
-        ebase = KVM_GUEST_KSEG0;
+		ebase = KVM_GUEST_KSEG0;
 #else
-        ebase = CKSEG0;
+		ebase = CKSEG0;
 #endif
-		if (cpu_has_mips_r2)
+		if (cpu_has_mips_r2 || cpu_has_mips_r6)
 			ebase += (read_c0_ebase() & 0x3ffff000);
 	}
 
@@ -2031,6 +2057,12 @@ void __init trap_init(void)
 		set_except_vector(15, handle_fpe);
 
 	set_except_vector(16, handle_ftlb);
+
+	if (cpu_has_rixi && cpu_has_rixi_except) {
+		set_except_vector(19, tlb_do_page_fault_0);
+		set_except_vector(20, tlb_do_page_fault_0);
+	}
+
 	set_except_vector(22, handle_mdmx);
 
 	if (cpu_has_mcheck)

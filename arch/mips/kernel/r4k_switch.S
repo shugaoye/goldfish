@@ -66,7 +66,7 @@
 
 	/* Now copy FR from it */
 
-#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_64BIT)
+#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6) || defined(CONFIG_64BIT)
 #ifdef CONFIG_MIPS_MT_SMTC
 
 	li      t3, ST0_FR
@@ -144,7 +144,7 @@
 	mtc0	t1, CP0_TCSTATUS
 #endif /* CONFIG_MIPS_MT_SMTC */
 	move	v0, a0
-#ifdef CONFIG_CPU_MIPSR2
+#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6)
 	jr.hb   ra
 #else
 	_ehb
@@ -156,7 +156,7 @@
  * Save a thread's fp context.
  */
 LEAF(_save_fp)
-#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_64BIT)
+#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6) || defined(CONFIG_64BIT)
 	mfc0	t0, CP0_STATUS
 #endif
 	fpu_save_double a0 t0 t1		# clobbers t1
@@ -167,7 +167,7 @@ LEAF(_save_fp)
  * Restore a thread's fp context.
  */
 LEAF(_restore_fp)
-#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_64BIT)
+#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6) || defined(CONFIG_64BIT)
 	mfc0	t0, CP0_STATUS
 #endif
 	fpu_restore_double a0 t0 t1		# clobbers t1
@@ -215,7 +215,7 @@ LEAF(_init_fpu)
 	sll     t0, t0, 31 - _ST0_FR
 	bgez	t0, 1f				# 16 / 32 register mode?
 
-#ifdef CONFIG_CPU_MIPSR2
+#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6)
 	enable_fpu_hazard
 	li      t2, FPU_CSR_NAN2008
 	cfc1    t3, fcr31
@@ -244,7 +244,7 @@ LEAF(_init_fpu)
 #endif /* CONFIG_64BIT */
 
 #ifdef CONFIG_CPU_MIPS32
-#ifdef CONFIG_CPU_MIPS32_R2
+#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6)
 	sll     t0, t0, 31 - _ST0_FR
 	bgez    t0, 2f                          # 16 / 32 register mode?
 
@@ -291,7 +291,7 @@ LEAF(_init_fpu)
 	mtc1	t1, $f30
 	mtc1	t1, $f31
 
-#ifdef CONFIG_CPU_MIPS32_R2
+#if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6)
 	bgez    t0, 1f                          # 16 / 32 register mode?
 
 	move    t1, t3                          # move SNaN, DP high word
@@ -331,9 +331,13 @@ LEAF(_init_fpu)
 	mthc1   t1, $f31
 	.set    pop
 1:
-#endif /* CONFIG_CPU_MIPS32_R2 */
-#else  /* CONFIG_CPU_MIPS32 */
+#endif /* CONFIG_CPU_MIPS32_R2 || CONFIG_CPU_MIPS32_R6 */
+#else  /* !CONFIG_CPU_MIPS32 */
+#ifdef CONFIG_CPU_MIPS64_R6
+	.set    mips64r6
+#else
 	.set	mips3
+#endif
 	dmtc1	t1, $f0
 	dmtc1	t1, $f2
 	dmtc1	t1, $f4
