@@ -471,6 +471,9 @@ int mm_isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 	unsigned int fcr31;
 	unsigned int bit;
 
+	if (!cpu_has_mmips)
+		return 0;
+
 	switch (insn.mm_i_format.opcode) {
 	case mm_pool32a_op:
 		if ((insn.mm_i_format.simmediate & MM_POOL32A_MINOR_MASK) ==
@@ -859,13 +862,7 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
  */
 static inline int cop1_64bit(struct pt_regs *xcp)
 {
-#if defined(CONFIG_64BIT) && !defined(CONFIG_MIPS32_O32)
-	return 1;
-#elif defined(CONFIG_64BIT) && defined(CONFIG_MIPS32_O32)
 	return !test_thread_flag(TIF_32BIT_REGS);
-#else
-	return 0;
-#endif
 }
 
 #define SIFROMREG(si, x) ((si) = cop1_64bit(xcp) || !(x & 1) ? \
@@ -883,6 +880,10 @@ static inline int cop1_64bit(struct pt_regs *xcp)
 #define SPTOREG(sp, x)	SITOREG((sp).bits, x)
 #define DPFROMREG(dp, x)	DIFROMREG((dp).bits, x)
 #define DPTOREG(dp, x)	DITOREG((dp).bits, x)
+
+#define SIFROMHREG(si, x)	((si) = (int)(ctx->fpr[x] >> 32))
+#define SITOHREG(si, x)		(ctx->fpr[x] = \
+				ctx->fpr[x] << 32 >> 32 | (u64)(si) << 32)
 
 /*
  * Emulate the single floating point instruction pointed at by EPC.
@@ -1050,6 +1051,21 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		case dmtc_op:
 			/* copregister fs <- rt */
 			DITOREG(xcp->regs[MIPSInst_RT(ir)], MIPSInst_RD(ir));
+			break;
+#endif
+
+#ifdef CONFIG_CPU_MIPSR2
+		case mfhc_op:
+			/* copregister rd -> gpr[rt] */
+			if (MIPSInst_RT(ir) != 0) {
+				SIFROMHREG(xcp->regs[MIPSInst_RT(ir)],
+					MIPSInst_RD(ir));
+			}
+			break;
+
+		case mthc_op:
+			/* copregister rd <- gpr[rt] */
+			SITOHREG(xcp->regs[MIPSInst_RT(ir)], MIPSInst_RD(ir));
 			break;
 #endif
 
@@ -1506,10 +1522,10 @@ static int fpux_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		break;
 	}
 
-	case 0x7:		/* 7 */
-		if (MIPSInst_FUNC(ir) != pfetch_op) {
+	case 0x3:
+		if (MIPSInst_FUNC(ir) != pfetch_op)
 			return SIGILL;
-		}
+
 		/* ignore prefx operation */
 		break;
 

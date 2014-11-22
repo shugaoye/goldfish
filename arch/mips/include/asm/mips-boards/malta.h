@@ -54,14 +54,20 @@ static inline unsigned long get_msc_port_base(unsigned long reg)
 /*
  * GCMP Specific definitions
  */
-#define GCMP_BASE_ADDR			0x1fbf8000
-#define GCMP_ADDRSPACE_SZ		(256 * 1024)
+#define GCMP_BASE_ADDR_MALTA            0x1fbf8000
+#define GCMP_ADDRSPACE_SZ_MALTA         (64 * 1024)
 
 /*
  * GIC Specific definitions
  */
 #define GIC_BASE_ADDR			0x1bdc0000
 #define GIC_ADDRSPACE_SZ		(128 * 1024)
+
+/*
+ * CPC Specific definitions
+ */
+#define CPC_BASE_ADDR_MALTA             0x1bde0000
+#define CPC_ADDRSPACE_SZ_MALTA          (32 * 1024)
 
 /*
  * MSC01 BIU Specific definitions

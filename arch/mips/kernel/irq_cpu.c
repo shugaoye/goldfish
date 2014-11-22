@@ -26,6 +26,8 @@
  *
  * This file exports one global function:
  *	void mips_cpu_irq_init(void);
+ * and one variable:
+ *      unsigned mips_smp_c0_status_mask;
  */
 #include <linux/init.h>
 #include <linux/interrupt.h>
@@ -36,6 +38,8 @@
 #include <asm/irq_cpu.h>
 #include <asm/mipsregs.h>
 #include <asm/mipsmtregs.h>
+
+unsigned mips_smp_c0_status_mask;
 
 static inline void unmask_mips_irq(struct irq_data *d)
 {

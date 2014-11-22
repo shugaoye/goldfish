@@ -105,6 +105,255 @@ static u32 unaligned_action;
 #define unaligned_action UNALIGNED_ACTION_QUIET
 #endif
 extern void show_registers(struct pt_regs *regs);
+asmlinkage void do_cpu(struct pt_regs *regs);
+
+#ifdef CONFIG_EVA
+/* EVA variant */
+
+#ifdef __BIG_ENDIAN
+#define     LoadHW(addr, value, res)  \
+		__asm__ __volatile__ (".set\tnoat\n"        \
+			"1:\tlbe\t%0, 0(%2)\n"               \
+			"2:\tlbue\t$1, 1(%2)\n\t"            \
+			"sll\t%0, 0x8\n\t"                  \
+			"or\t%0, $1\n\t"                    \
+			"li\t%1, 0\n"                       \
+			"3:\t.set\tat\n\t"                  \
+			".insn\n\t"                         \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%1, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=&r" (value), "=r" (res)         \
+			: "r" (addr), "i" (-EFAULT));
+
+#define     LoadW(addr, value, res)   \
+		__asm__ __volatile__ (                      \
+			"1:\tlwle\t%0, (%2)\n"               \
+			"2:\tlwre\t%0, 3(%2)\n\t"            \
+			"li\t%1, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%1, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=&r" (value), "=r" (res)         \
+			: "r" (addr), "i" (-EFAULT));
+
+#define     LoadHWU(addr, value, res) \
+		__asm__ __volatile__ (                      \
+			".set\tnoat\n"                      \
+			"1:\tlbue\t%0, 0(%2)\n"              \
+			"2:\tlbue\t$1, 1(%2)\n\t"            \
+			"sll\t%0, 0x8\n\t"                  \
+			"or\t%0, $1\n\t"                    \
+			"li\t%1, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			".set\tat\n\t"                      \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%1, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=&r" (value), "=r" (res)         \
+			: "r" (addr), "i" (-EFAULT));
+
+#define     LoadWU(addr, value, res)  \
+		__asm__ __volatile__ (                      \
+			"1:\tlwle\t%0, (%2)\n"               \
+			"2:\tlwre\t%0, 3(%2)\n\t"            \
+			"dsll\t%0, %0, 32\n\t"              \
+			"dsrl\t%0, %0, 32\n\t"              \
+			"li\t%1, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			"\t.section\t.fixup,\"ax\"\n\t"     \
+			"4:\tli\t%1, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=&r" (value), "=r" (res)         \
+			: "r" (addr), "i" (-EFAULT));
+
+#define     StoreHW(addr, value, res) \
+		__asm__ __volatile__ (                      \
+			".set\tnoat\n"                      \
+			"1:\tsbe\t%1, 1(%2)\n\t"             \
+			"srl\t$1, %1, 0x8\n"                \
+			"2:\tsbe\t$1, 0(%2)\n\t"             \
+			".set\tat\n\t"                      \
+			"li\t%0, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%0, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=r" (res)                        \
+			: "r" (value), "r" (addr), "i" (-EFAULT));
+
+#define     StoreW(addr, value, res)  \
+		__asm__ __volatile__ (                      \
+			"1:\tswle\t%1,(%2)\n"                \
+			"2:\tswre\t%1, 3(%2)\n\t"            \
+			"li\t%0, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%0, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+		: "=r" (res)                                \
+		: "r" (value), "r" (addr), "i" (-EFAULT));
+#endif
+
+#ifdef __LITTLE_ENDIAN
+#define     LoadHW(addr, value, res)  \
+		__asm__ __volatile__ (".set\tnoat\n"        \
+			"1:\tlbe\t%0, 1(%2)\n"               \
+			"2:\tlbue\t$1, 0(%2)\n\t"            \
+			"sll\t%0, 0x8\n\t"                  \
+			"or\t%0, $1\n\t"                    \
+			"li\t%1, 0\n"                       \
+			"3:\t.set\tat\n\t"                  \
+			".insn\n\t"                         \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%1, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=&r" (value), "=r" (res)         \
+			: "r" (addr), "i" (-EFAULT));
+
+#define     LoadW(addr, value, res)   \
+		__asm__ __volatile__ (                      \
+			"1:\tlwle\t%0, 3(%2)\n"              \
+			"2:\tlwre\t%0, (%2)\n\t"             \
+			"li\t%1, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%1, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=&r" (value), "=r" (res)         \
+			: "r" (addr), "i" (-EFAULT));
+
+#define     LoadHWU(addr, value, res) \
+		__asm__ __volatile__ (                      \
+			".set\tnoat\n"                      \
+			"1:\tlbue\t%0, 1(%2)\n"              \
+			"2:\tlbue\t$1, 0(%2)\n\t"            \
+			"sll\t%0, 0x8\n\t"                  \
+			"or\t%0, $1\n\t"                    \
+			"li\t%1, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			".set\tat\n\t"                      \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%1, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=&r" (value), "=r" (res)         \
+			: "r" (addr), "i" (-EFAULT));
+
+#define     LoadWU(addr, value, res)  \
+		__asm__ __volatile__ (                      \
+			"1:\tlwle\t%0, 3(%2)\n"              \
+			"2:\tlwre\t%0, (%2)\n\t"             \
+			"dsll\t%0, %0, 32\n\t"              \
+			"dsrl\t%0, %0, 32\n\t"              \
+			"li\t%1, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			"\t.section\t.fixup,\"ax\"\n\t"     \
+			"4:\tli\t%1, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=&r" (value), "=r" (res)         \
+			: "r" (addr), "i" (-EFAULT));
+
+#define     StoreHW(addr, value, res) \
+		__asm__ __volatile__ (                      \
+			".set\tnoat\n"                      \
+			"1:\tsbe\t%1, 0(%2)\n\t"             \
+			"srl\t$1,%1, 0x8\n"                 \
+			"2:\tsbe\t$1, 1(%2)\n\t"             \
+			".set\tat\n\t"                      \
+			"li\t%0, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%0, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+			: "=r" (res)                        \
+			: "r" (value), "r" (addr), "i" (-EFAULT));
+
+#define     StoreW(addr, value, res)  \
+		__asm__ __volatile__ (                      \
+			"1:\tswle\t%1, 3(%2)\n"              \
+			"2:\tswre\t%1, (%2)\n\t"             \
+			"li\t%0, 0\n"                       \
+			"3:\n\t"                            \
+			".insn\n\t"                         \
+			".section\t.fixup,\"ax\"\n\t"       \
+			"4:\tli\t%0, %3\n\t"                \
+			"j\t3b\n\t"                         \
+			".previous\n\t"                     \
+			".section\t__ex_table,\"a\"\n\t"    \
+			STR(PTR)"\t1b, 4b\n\t"              \
+			STR(PTR)"\t2b, 4b\n\t"              \
+			".previous"                         \
+		: "=r" (res)                                \
+		: "r" (value), "r" (addr), "i" (-EFAULT));
+#endif
+
+#else
+/* non-EVA variant */
 
 #ifdef __BIG_ENDIAN
 #define     LoadHW(addr, value, res)  \
@@ -420,6 +669,333 @@ extern void show_registers(struct pt_regs *regs);
 		: "r" (value), "r" (addr), "i" (-EFAULT));
 #endif
 
+#endif
+
+#ifdef CONFIG_64BIT
+static inline void dmtc1(unsigned long val, unsigned reg)
+{
+	switch (reg) {
+	case 0: __asm__ __volatile__ ("dmtc1\t%0,$0"::"r"(val)); break;
+	case 1: __asm__ __volatile__ ("dmtc1\t%0,$1"::"r"(val)); break;
+	case 2: __asm__ __volatile__ ("dmtc1\t%0,$2"::"r"(val)); break;
+	case 3: __asm__ __volatile__ ("dmtc1\t%0,$3"::"r"(val)); break;
+	case 4: __asm__ __volatile__ ("dmtc1\t%0,$4"::"r"(val)); break;
+	case 5: __asm__ __volatile__ ("dmtc1\t%0,$5"::"r"(val)); break;
+	case 6: __asm__ __volatile__ ("dmtc1\t%0,$6"::"r"(val)); break;
+	case 7: __asm__ __volatile__ ("dmtc1\t%0,$7"::"r"(val)); break;
+	case 8: __asm__ __volatile__ ("dmtc1\t%0,$8"::"r"(val)); break;
+	case 9: __asm__ __volatile__ ("dmtc1\t%0,$9"::"r"(val)); break;
+	case 10: __asm__ __volatile__ ("dmtc1\t%0,$10"::"r"(val)); break;
+	case 11: __asm__ __volatile__ ("dmtc1\t%0,$11"::"r"(val)); break;
+	case 12: __asm__ __volatile__ ("dmtc1\t%0,$12"::"r"(val)); break;
+	case 13: __asm__ __volatile__ ("dmtc1\t%0,$13"::"r"(val)); break;
+	case 14: __asm__ __volatile__ ("dmtc1\t%0,$14"::"r"(val)); break;
+	case 15: __asm__ __volatile__ ("dmtc1\t%0,$15"::"r"(val)); break;
+	case 16: __asm__ __volatile__ ("dmtc1\t%0,$16"::"r"(val)); break;
+	case 17: __asm__ __volatile__ ("dmtc1\t%0,$17"::"r"(val)); break;
+	case 18: __asm__ __volatile__ ("dmtc1\t%0,$18"::"r"(val)); break;
+	case 19: __asm__ __volatile__ ("dmtc1\t%0,$19"::"r"(val)); break;
+	case 20: __asm__ __volatile__ ("dmtc1\t%0,$20"::"r"(val)); break;
+	case 21: __asm__ __volatile__ ("dmtc1\t%0,$21"::"r"(val)); break;
+	case 22: __asm__ __volatile__ ("dmtc1\t%0,$22"::"r"(val)); break;
+	case 23: __asm__ __volatile__ ("dmtc1\t%0,$23"::"r"(val)); break;
+	case 24: __asm__ __volatile__ ("dmtc1\t%0,$24"::"r"(val)); break;
+	case 25: __asm__ __volatile__ ("dmtc1\t%0,$25"::"r"(val)); break;
+	case 26: __asm__ __volatile__ ("dmtc1\t%0,$26"::"r"(val)); break;
+	case 27: __asm__ __volatile__ ("dmtc1\t%0,$27"::"r"(val)); break;
+	case 28: __asm__ __volatile__ ("dmtc1\t%0,$28"::"r"(val)); break;
+	case 29: __asm__ __volatile__ ("dmtc1\t%0,$29"::"r"(val)); break;
+	case 30: __asm__ __volatile__ ("dmtc1\t%0,$30"::"r"(val)); break;
+	case 31: __asm__ __volatile__ ("dmtc1\t%0,$31"::"r"(val)); break;
+	}
+}
+
+static inline unsigned long dmfc1(unsigned reg)
+{
+	unsigned long uninitialized_var(val);
+
+	switch (reg) {
+	case 0: __asm__ __volatile__ ("dmfc1\t%0,$0":"=r"(val)); break;
+	case 1: __asm__ __volatile__ ("dmfc1\t%0,$1":"=r"(val)); break;
+	case 2: __asm__ __volatile__ ("dmfc1\t%0,$2":"=r"(val)); break;
+	case 3: __asm__ __volatile__ ("dmfc1\t%0,$3":"=r"(val)); break;
+	case 4: __asm__ __volatile__ ("dmfc1\t%0,$4":"=r"(val)); break;
+	case 5: __asm__ __volatile__ ("dmfc1\t%0,$5":"=r"(val)); break;
+	case 6: __asm__ __volatile__ ("dmfc1\t%0,$6":"=r"(val)); break;
+	case 7: __asm__ __volatile__ ("dmfc1\t%0,$7":"=r"(val)); break;
+	case 8: __asm__ __volatile__ ("dmfc1\t%0,$8":"=r"(val)); break;
+	case 9: __asm__ __volatile__ ("dmfc1\t%0,$9":"=r"(val)); break;
+	case 10: __asm__ __volatile__ ("dmfc1\t%0,$10":"=r"(val)); break;
+	case 11: __asm__ __volatile__ ("dmfc1\t%0,$11":"=r"(val)); break;
+	case 12: __asm__ __volatile__ ("dmfc1\t%0,$12":"=r"(val)); break;
+	case 13: __asm__ __volatile__ ("dmfc1\t%0,$13":"=r"(val)); break;
+	case 14: __asm__ __volatile__ ("dmfc1\t%0,$14":"=r"(val)); break;
+	case 15: __asm__ __volatile__ ("dmfc1\t%0,$15":"=r"(val)); break;
+	case 16: __asm__ __volatile__ ("dmfc1\t%0,$16":"=r"(val)); break;
+	case 17: __asm__ __volatile__ ("dmfc1\t%0,$17":"=r"(val)); break;
+	case 18: __asm__ __volatile__ ("dmfc1\t%0,$18":"=r"(val)); break;
+	case 19: __asm__ __volatile__ ("dmfc1\t%0,$19":"=r"(val)); break;
+	case 20: __asm__ __volatile__ ("dmfc1\t%0,$20":"=r"(val)); break;
+	case 21: __asm__ __volatile__ ("dmfc1\t%0,$21":"=r"(val)); break;
+	case 22: __asm__ __volatile__ ("dmfc1\t%0,$22":"=r"(val)); break;
+	case 23: __asm__ __volatile__ ("dmfc1\t%0,$23":"=r"(val)); break;
+	case 24: __asm__ __volatile__ ("dmfc1\t%0,$24":"=r"(val)); break;
+	case 25: __asm__ __volatile__ ("dmfc1\t%0,$25":"=r"(val)); break;
+	case 26: __asm__ __volatile__ ("dmfc1\t%0,$26":"=r"(val)); break;
+	case 27: __asm__ __volatile__ ("dmfc1\t%0,$27":"=r"(val)); break;
+	case 28: __asm__ __volatile__ ("dmfc1\t%0,$28":"=r"(val)); break;
+	case 29: __asm__ __volatile__ ("dmfc1\t%0,$29":"=r"(val)); break;
+	case 30: __asm__ __volatile__ ("dmfc1\t%0,$30":"=r"(val)); break;
+	case 31: __asm__ __volatile__ ("dmfc1\t%0,$31":"=r"(val)); break;
+	}
+
+	return val;
+}
+#else /* !CONFIG_64BIT */
+
+static inline void mtc1_mthc1(unsigned long val, unsigned long val2, unsigned reg)
+{
+	switch (reg) {
+#ifdef __BIG_ENDIAN
+	case 0:  __asm__ __volatile__ ("mtc1\t%0,$0\n\tmthc1\t%1,$0"::"r"(val2),"r"(val)); break;
+	case 1:  __asm__ __volatile__ ("mtc1\t%0,$1\n\tmthc1\t%1,$1"::"r"(val2),"r"(val)); break;
+	case 2:  __asm__ __volatile__ ("mtc1\t%0,$2\n\tmthc1\t%1,$2"::"r"(val2),"r"(val)); break;
+	case 3:  __asm__ __volatile__ ("mtc1\t%0,$3\n\tmthc1\t%1,$3"::"r"(val2),"r"(val)); break;
+	case 4:  __asm__ __volatile__ ("mtc1\t%0,$4\n\tmthc1\t%1,$4"::"r"(val2),"r"(val)); break;
+	case 5:  __asm__ __volatile__ ("mtc1\t%0,$5\n\tmthc1\t%1,$5"::"r"(val2),"r"(val)); break;
+	case 6:  __asm__ __volatile__ ("mtc1\t%0,$6\n\tmthc1\t%1,$6"::"r"(val2),"r"(val)); break;
+	case 7:  __asm__ __volatile__ ("mtc1\t%0,$7\n\tmthc1\t%1,$7"::"r"(val2),"r"(val)); break;
+	case 8:  __asm__ __volatile__ ("mtc1\t%0,$8\n\tmthc1\t%1,$8"::"r"(val2),"r"(val)); break;
+	case 9:  __asm__ __volatile__ ("mtc1\t%0,$9\n\tmthc1\t%1,$9"::"r"(val2),"r"(val)); break;
+	case 10: __asm__ __volatile__ ("mtc1\t%0,$10\n\tmthc1\t%1,$10"::"r"(val2),"r"(val)); break;
+	case 11: __asm__ __volatile__ ("mtc1\t%0,$11\n\tmthc1\t%1,$11"::"r"(val2),"r"(val)); break;
+	case 12: __asm__ __volatile__ ("mtc1\t%0,$12\n\tmthc1\t%1,$12"::"r"(val2),"r"(val)); break;
+	case 13: __asm__ __volatile__ ("mtc1\t%0,$13\n\tmthc1\t%1,$13"::"r"(val2),"r"(val)); break;
+	case 14: __asm__ __volatile__ ("mtc1\t%0,$14\n\tmthc1\t%1,$14"::"r"(val2),"r"(val)); break;
+	case 15: __asm__ __volatile__ ("mtc1\t%0,$15\n\tmthc1\t%1,$15"::"r"(val2),"r"(val)); break;
+	case 16: __asm__ __volatile__ ("mtc1\t%0,$16\n\tmthc1\t%1,$16"::"r"(val2),"r"(val)); break;
+	case 17: __asm__ __volatile__ ("mtc1\t%0,$17\n\tmthc1\t%1,$17"::"r"(val2),"r"(val)); break;
+	case 18: __asm__ __volatile__ ("mtc1\t%0,$18\n\tmthc1\t%1,$18"::"r"(val2),"r"(val)); break;
+	case 19: __asm__ __volatile__ ("mtc1\t%0,$19\n\tmthc1\t%1,$19"::"r"(val2),"r"(val)); break;
+	case 20: __asm__ __volatile__ ("mtc1\t%0,$20\n\tmthc1\t%1,$20"::"r"(val2),"r"(val)); break;
+	case 21: __asm__ __volatile__ ("mtc1\t%0,$21\n\tmthc1\t%1,$21"::"r"(val2),"r"(val)); break;
+	case 22: __asm__ __volatile__ ("mtc1\t%0,$22\n\tmthc1\t%1,$22"::"r"(val2),"r"(val)); break;
+	case 23: __asm__ __volatile__ ("mtc1\t%0,$23\n\tmthc1\t%1,$23"::"r"(val2),"r"(val)); break;
+	case 24: __asm__ __volatile__ ("mtc1\t%0,$24\n\tmthc1\t%1,$24"::"r"(val2),"r"(val)); break;
+	case 25: __asm__ __volatile__ ("mtc1\t%0,$25\n\tmthc1\t%1,$25"::"r"(val2),"r"(val)); break;
+	case 26: __asm__ __volatile__ ("mtc1\t%0,$26\n\tmthc1\t%1,$26"::"r"(val2),"r"(val)); break;
+	case 27: __asm__ __volatile__ ("mtc1\t%0,$27\n\tmthc1\t%1,$27"::"r"(val2),"r"(val)); break;
+	case 28: __asm__ __volatile__ ("mtc1\t%0,$28\n\tmthc1\t%1,$28"::"r"(val2),"r"(val)); break;
+	case 29: __asm__ __volatile__ ("mtc1\t%0,$29\n\tmthc1\t%1,$29"::"r"(val2),"r"(val)); break;
+	case 30: __asm__ __volatile__ ("mtc1\t%0,$30\n\tmthc1\t%1,$30"::"r"(val2),"r"(val)); break;
+	case 31: __asm__ __volatile__ ("mtc1\t%0,$31\n\tmthc1\t%1,$31"::"r"(val2),"r"(val)); break;
+	}
+#endif
+#ifdef __LITTLE_ENDIAN
+	case 0:  __asm__ __volatile__ ("mtc1\t%0,$0\n\tmthc1\t%1,$0"::"r"(val),"r"(val2)); break;
+	case 1:  __asm__ __volatile__ ("mtc1\t%0,$1\n\tmthc1\t%1,$1"::"r"(val),"r"(val2)); break;
+	case 2:  __asm__ __volatile__ ("mtc1\t%0,$2\n\tmthc1\t%1,$2"::"r"(val),"r"(val2)); break;
+	case 3:  __asm__ __volatile__ ("mtc1\t%0,$3\n\tmthc1\t%1,$3"::"r"(val),"r"(val2)); break;
+	case 4:  __asm__ __volatile__ ("mtc1\t%0,$4\n\tmthc1\t%1,$4"::"r"(val),"r"(val2)); break;
+	case 5:  __asm__ __volatile__ ("mtc1\t%0,$5\n\tmthc1\t%1,$5"::"r"(val),"r"(val2)); break;
+	case 6:  __asm__ __volatile__ ("mtc1\t%0,$6\n\tmthc1\t%1,$6"::"r"(val),"r"(val2)); break;
+	case 7:  __asm__ __volatile__ ("mtc1\t%0,$7\n\tmthc1\t%1,$7"::"r"(val),"r"(val2)); break;
+	case 8:  __asm__ __volatile__ ("mtc1\t%0,$8\n\tmthc1\t%1,$8"::"r"(val),"r"(val2)); break;
+	case 9:  __asm__ __volatile__ ("mtc1\t%0,$9\n\tmthc1\t%1,$9"::"r"(val),"r"(val2)); break;
+	case 10: __asm__ __volatile__ ("mtc1\t%0,$10\n\tmthc1\t%1,$10"::"r"(val),"r"(val2)); break;
+	case 11: __asm__ __volatile__ ("mtc1\t%0,$11\n\tmthc1\t%1,$11"::"r"(val),"r"(val2)); break;
+	case 12: __asm__ __volatile__ ("mtc1\t%0,$12\n\tmthc1\t%1,$12"::"r"(val),"r"(val2)); break;
+	case 13: __asm__ __volatile__ ("mtc1\t%0,$13\n\tmthc1\t%1,$13"::"r"(val),"r"(val2)); break;
+	case 14: __asm__ __volatile__ ("mtc1\t%0,$14\n\tmthc1\t%1,$14"::"r"(val),"r"(val2)); break;
+	case 15: __asm__ __volatile__ ("mtc1\t%0,$15\n\tmthc1\t%1,$15"::"r"(val),"r"(val2)); break;
+	case 16: __asm__ __volatile__ ("mtc1\t%0,$16\n\tmthc1\t%1,$16"::"r"(val),"r"(val2)); break;
+	case 17: __asm__ __volatile__ ("mtc1\t%0,$17\n\tmthc1\t%1,$17"::"r"(val),"r"(val2)); break;
+	case 18: __asm__ __volatile__ ("mtc1\t%0,$18\n\tmthc1\t%1,$18"::"r"(val),"r"(val2)); break;
+	case 19: __asm__ __volatile__ ("mtc1\t%0,$19\n\tmthc1\t%1,$19"::"r"(val),"r"(val2)); break;
+	case 20: __asm__ __volatile__ ("mtc1\t%0,$20\n\tmthc1\t%1,$20"::"r"(val),"r"(val2)); break;
+	case 21: __asm__ __volatile__ ("mtc1\t%0,$21\n\tmthc1\t%1,$21"::"r"(val),"r"(val2)); break;
+	case 22: __asm__ __volatile__ ("mtc1\t%0,$22\n\tmthc1\t%1,$22"::"r"(val),"r"(val2)); break;
+	case 23: __asm__ __volatile__ ("mtc1\t%0,$23\n\tmthc1\t%1,$23"::"r"(val),"r"(val2)); break;
+	case 24: __asm__ __volatile__ ("mtc1\t%0,$24\n\tmthc1\t%1,$24"::"r"(val),"r"(val2)); break;
+	case 25: __asm__ __volatile__ ("mtc1\t%0,$25\n\tmthc1\t%1,$25"::"r"(val),"r"(val2)); break;
+	case 26: __asm__ __volatile__ ("mtc1\t%0,$26\n\tmthc1\t%1,$26"::"r"(val),"r"(val2)); break;
+	case 27: __asm__ __volatile__ ("mtc1\t%0,$27\n\tmthc1\t%1,$27"::"r"(val),"r"(val2)); break;
+	case 28: __asm__ __volatile__ ("mtc1\t%0,$28\n\tmthc1\t%1,$28"::"r"(val),"r"(val2)); break;
+	case 29: __asm__ __volatile__ ("mtc1\t%0,$29\n\tmthc1\t%1,$29"::"r"(val),"r"(val2)); break;
+	case 30: __asm__ __volatile__ ("mtc1\t%0,$30\n\tmthc1\t%1,$30"::"r"(val),"r"(val2)); break;
+	case 31: __asm__ __volatile__ ("mtc1\t%0,$31\n\tmthc1\t%1,$31"::"r"(val),"r"(val2)); break;
+	}
+#endif
+}
+
+static inline void mfc1_mfhc1(unsigned long *val, unsigned long *val2, unsigned reg)
+{
+	unsigned long uninitialized_var(lval), uninitialized_var(lval2);
+
+	switch (reg) {
+#ifdef __BIG_ENDIAN
+	case 0:  __asm__ __volatile__ ("mfc1\t%0,$0\n\tmfhc1\t%1,$0":"=r"(lval2),"=r"(lval)); break;
+	case 1:  __asm__ __volatile__ ("mfc1\t%0,$1\n\tmfhc1\t%1,$1":"=r"(lval2),"=r"(lval)); break;
+	case 2:  __asm__ __volatile__ ("mfc1\t%0,$2\n\tmfhc1\t%1,$2":"=r"(lval2),"=r"(lval)); break;
+	case 3:  __asm__ __volatile__ ("mfc1\t%0,$3\n\tmfhc1\t%1,$3":"=r"(lval2),"=r"(lval)); break;
+	case 4:  __asm__ __volatile__ ("mfc1\t%0,$4\n\tmfhc1\t%1,$4":"=r"(lval2),"=r"(lval)); break;
+	case 5:  __asm__ __volatile__ ("mfc1\t%0,$5\n\tmfhc1\t%1,$5":"=r"(lval2),"=r"(lval)); break;
+	case 6:  __asm__ __volatile__ ("mfc1\t%0,$6\n\tmfhc1\t%1,$6":"=r"(lval2),"=r"(lval)); break;
+	case 7:  __asm__ __volatile__ ("mfc1\t%0,$7\n\tmfhc1\t%1,$7":"=r"(lval2),"=r"(lval)); break;
+	case 8:  __asm__ __volatile__ ("mfc1\t%0,$8\n\tmfhc1\t%1,$8":"=r"(lval2),"=r"(lval)); break;
+	case 9:  __asm__ __volatile__ ("mfc1\t%0,$9\n\tmfhc1\t%1,$9":"=r"(lval2),"=r"(lval)); break;
+	case 10: __asm__ __volatile__ ("mfc1\t%0,$10\n\tmfhc1\t%1,$10":"=r"(lval2),"=r"(lval)); break;
+	case 11: __asm__ __volatile__ ("mfc1\t%0,$11\n\tmfhc1\t%1,$11":"=r"(lval2),"=r"(lval)); break;
+	case 12: __asm__ __volatile__ ("mfc1\t%0,$12\n\tmfhc1\t%1,$12":"=r"(lval2),"=r"(lval)); break;
+	case 13: __asm__ __volatile__ ("mfc1\t%0,$13\n\tmfhc1\t%1,$13":"=r"(lval2),"=r"(lval)); break;
+	case 14: __asm__ __volatile__ ("mfc1\t%0,$14\n\tmfhc1\t%1,$14":"=r"(lval2),"=r"(lval)); break;
+	case 15: __asm__ __volatile__ ("mfc1\t%0,$15\n\tmfhc1\t%1,$15":"=r"(lval2),"=r"(lval)); break;
+	case 16: __asm__ __volatile__ ("mfc1\t%0,$16\n\tmfhc1\t%1,$16":"=r"(lval2),"=r"(lval)); break;
+	case 17: __asm__ __volatile__ ("mfc1\t%0,$17\n\tmfhc1\t%1,$17":"=r"(lval2),"=r"(lval)); break;
+	case 18: __asm__ __volatile__ ("mfc1\t%0,$18\n\tmfhc1\t%1,$18":"=r"(lval2),"=r"(lval)); break;
+	case 19: __asm__ __volatile__ ("mfc1\t%0,$19\n\tmfhc1\t%1,$19":"=r"(lval2),"=r"(lval)); break;
+	case 20: __asm__ __volatile__ ("mfc1\t%0,$20\n\tmfhc1\t%1,$20":"=r"(lval2),"=r"(lval)); break;
+	case 21: __asm__ __volatile__ ("mfc1\t%0,$21\n\tmfhc1\t%1,$21":"=r"(lval2),"=r"(lval)); break;
+	case 22: __asm__ __volatile__ ("mfc1\t%0,$22\n\tmfhc1\t%1,$22":"=r"(lval2),"=r"(lval)); break;
+	case 23: __asm__ __volatile__ ("mfc1\t%0,$23\n\tmfhc1\t%1,$23":"=r"(lval2),"=r"(lval)); break;
+	case 24: __asm__ __volatile__ ("mfc1\t%0,$24\n\tmfhc1\t%1,$24":"=r"(lval2),"=r"(lval)); break;
+	case 25: __asm__ __volatile__ ("mfc1\t%0,$25\n\tmfhc1\t%1,$25":"=r"(lval2),"=r"(lval)); break;
+	case 26: __asm__ __volatile__ ("mfc1\t%0,$26\n\tmfhc1\t%1,$26":"=r"(lval2),"=r"(lval)); break;
+	case 27: __asm__ __volatile__ ("mfc1\t%0,$27\n\tmfhc1\t%1,$27":"=r"(lval2),"=r"(lval)); break;
+	case 28: __asm__ __volatile__ ("mfc1\t%0,$28\n\tmfhc1\t%1,$28":"=r"(lval2),"=r"(lval)); break;
+	case 29: __asm__ __volatile__ ("mfc1\t%0,$29\n\tmfhc1\t%1,$29":"=r"(lval2),"=r"(lval)); break;
+	case 30: __asm__ __volatile__ ("mfc1\t%0,$30\n\tmfhc1\t%1,$30":"=r"(lval2),"=r"(lval)); break;
+	case 31: __asm__ __volatile__ ("mfc1\t%0,$31\n\tmfhc1\t%1,$31":"=r"(lval2),"=r"(lval)); break;
+#endif
+#ifdef __LITTLE_ENDIAN
+	case 0:  __asm__ __volatile__ ("mfc1\t%0,$0\n\tmfhc1\t%1,$0":"=r"(lval),"=r"(lval2)); break;
+	case 1:  __asm__ __volatile__ ("mfc1\t%0,$1\n\tmfhc1\t%1,$1":"=r"(lval),"=r"(lval2)); break;
+	case 2:  __asm__ __volatile__ ("mfc1\t%0,$2\n\tmfhc1\t%1,$2":"=r"(lval),"=r"(lval2)); break;
+	case 3:  __asm__ __volatile__ ("mfc1\t%0,$3\n\tmfhc1\t%1,$3":"=r"(lval),"=r"(lval2)); break;
+	case 4:  __asm__ __volatile__ ("mfc1\t%0,$4\n\tmfhc1\t%1,$4":"=r"(lval),"=r"(lval2)); break;
+	case 5:  __asm__ __volatile__ ("mfc1\t%0,$5\n\tmfhc1\t%1,$5":"=r"(lval),"=r"(lval2)); break;
+	case 6:  __asm__ __volatile__ ("mfc1\t%0,$6\n\tmfhc1\t%1,$6":"=r"(lval),"=r"(lval2)); break;
+	case 7:  __asm__ __volatile__ ("mfc1\t%0,$7\n\tmfhc1\t%1,$7":"=r"(lval),"=r"(lval2)); break;
+	case 8:  __asm__ __volatile__ ("mfc1\t%0,$8\n\tmfhc1\t%1,$8":"=r"(lval),"=r"(lval2)); break;
+	case 9:  __asm__ __volatile__ ("mfc1\t%0,$9\n\tmfhc1\t%1,$9":"=r"(lval),"=r"(lval2)); break;
+	case 10: __asm__ __volatile__ ("mfc1\t%0,$10\n\tmfhc1\t%1,$10":"=r"(lval),"=r"(lval2)); break;
+	case 11: __asm__ __volatile__ ("mfc1\t%0,$11\n\tmfhc1\t%1,$11":"=r"(lval),"=r"(lval2)); break;
+	case 12: __asm__ __volatile__ ("mfc1\t%0,$12\n\tmfhc1\t%1,$12":"=r"(lval),"=r"(lval2)); break;
+	case 13: __asm__ __volatile__ ("mfc1\t%0,$13\n\tmfhc1\t%1,$13":"=r"(lval),"=r"(lval2)); break;
+	case 14: __asm__ __volatile__ ("mfc1\t%0,$14\n\tmfhc1\t%1,$14":"=r"(lval),"=r"(lval2)); break;
+	case 15: __asm__ __volatile__ ("mfc1\t%0,$15\n\tmfhc1\t%1,$15":"=r"(lval),"=r"(lval2)); break;
+	case 16: __asm__ __volatile__ ("mfc1\t%0,$16\n\tmfhc1\t%1,$16":"=r"(lval),"=r"(lval2)); break;
+	case 17: __asm__ __volatile__ ("mfc1\t%0,$17\n\tmfhc1\t%1,$17":"=r"(lval),"=r"(lval2)); break;
+	case 18: __asm__ __volatile__ ("mfc1\t%0,$18\n\tmfhc1\t%1,$18":"=r"(lval),"=r"(lval2)); break;
+	case 19: __asm__ __volatile__ ("mfc1\t%0,$19\n\tmfhc1\t%1,$19":"=r"(lval),"=r"(lval2)); break;
+	case 20: __asm__ __volatile__ ("mfc1\t%0,$20\n\tmfhc1\t%1,$20":"=r"(lval),"=r"(lval2)); break;
+	case 21: __asm__ __volatile__ ("mfc1\t%0,$21\n\tmfhc1\t%1,$21":"=r"(lval),"=r"(lval2)); break;
+	case 22: __asm__ __volatile__ ("mfc1\t%0,$22\n\tmfhc1\t%1,$22":"=r"(lval),"=r"(lval2)); break;
+	case 23: __asm__ __volatile__ ("mfc1\t%0,$23\n\tmfhc1\t%1,$23":"=r"(lval),"=r"(lval2)); break;
+	case 24: __asm__ __volatile__ ("mfc1\t%0,$24\n\tmfhc1\t%1,$24":"=r"(lval),"=r"(lval2)); break;
+	case 25: __asm__ __volatile__ ("mfc1\t%0,$25\n\tmfhc1\t%1,$25":"=r"(lval),"=r"(lval2)); break;
+	case 26: __asm__ __volatile__ ("mfc1\t%0,$26\n\tmfhc1\t%1,$26":"=r"(lval),"=r"(lval2)); break;
+	case 27: __asm__ __volatile__ ("mfc1\t%0,$27\n\tmfhc1\t%1,$27":"=r"(lval),"=r"(lval2)); break;
+	case 28: __asm__ __volatile__ ("mfc1\t%0,$28\n\tmfhc1\t%1,$28":"=r"(lval),"=r"(lval2)); break;
+	case 29: __asm__ __volatile__ ("mfc1\t%0,$29\n\tmfhc1\t%1,$29":"=r"(lval),"=r"(lval2)); break;
+	case 30: __asm__ __volatile__ ("mfc1\t%0,$30\n\tmfhc1\t%1,$30":"=r"(lval),"=r"(lval2)); break;
+	case 31: __asm__ __volatile__ ("mfc1\t%0,$31\n\tmfhc1\t%1,$31":"=r"(lval),"=r"(lval2)); break;
+#endif
+	}
+	*val = lval;
+	*val2 = lval2;
+}
+#endif /* CONFIG_64BIT */
+
+static inline void mtc1_pair(unsigned long val, unsigned long val2, unsigned reg)
+{
+	switch (reg & ~0x1) {
+#ifdef __BIG_ENDIAN
+	case 0:  __asm__ __volatile__ ("mtc1\t%0,$0\n\tmtc1\t%1,$1"::"r"(val2),"r"(val)); break;
+	case 2:  __asm__ __volatile__ ("mtc1\t%0,$2\n\tmtc1\t%1,$3"::"r"(val2),"r"(val)); break;
+	case 4:  __asm__ __volatile__ ("mtc1\t%0,$4\n\tmtc1\t%1,$5"::"r"(val2),"r"(val)); break;
+	case 6:  __asm__ __volatile__ ("mtc1\t%0,$6\n\tmtc1\t%1,$7"::"r"(val2),"r"(val)); break;
+	case 8:  __asm__ __volatile__ ("mtc1\t%0,$8\n\tmtc1\t%1,$9"::"r"(val2),"r"(val)); break;
+	case 10: __asm__ __volatile__ ("mtc1\t%0,$10\n\tmtc1\t%1,$11"::"r"(val2),"r"(val)); break;
+	case 12: __asm__ __volatile__ ("mtc1\t%0,$12\n\tmtc1\t%1,$13"::"r"(val2),"r"(val)); break;
+	case 14: __asm__ __volatile__ ("mtc1\t%0,$14\n\tmtc1\t%1,$15"::"r"(val2),"r"(val)); break;
+	case 16: __asm__ __volatile__ ("mtc1\t%0,$16\n\tmtc1\t%1,$17"::"r"(val2),"r"(val)); break;
+	case 18: __asm__ __volatile__ ("mtc1\t%0,$18\n\tmtc1\t%1,$19"::"r"(val2),"r"(val)); break;
+	case 20: __asm__ __volatile__ ("mtc1\t%0,$20\n\tmtc1\t%1,$21"::"r"(val2),"r"(val)); break;
+	case 22: __asm__ __volatile__ ("mtc1\t%0,$22\n\tmtc1\t%1,$23"::"r"(val2),"r"(val)); break;
+	case 24: __asm__ __volatile__ ("mtc1\t%0,$24\n\tmtc1\t%1,$25"::"r"(val2),"r"(val)); break;
+	case 26: __asm__ __volatile__ ("mtc1\t%0,$26\n\tmtc1\t%1,$27"::"r"(val2),"r"(val)); break;
+	case 28: __asm__ __volatile__ ("mtc1\t%0,$28\n\tmtc1\t%1,$29"::"r"(val2),"r"(val)); break;
+	case 30: __asm__ __volatile__ ("mtc1\t%0,$30\n\tmtc1\t%1,$31"::"r"(val2),"r"(val)); break;
+#endif
+#ifdef __LITTLE_ENDIAN
+	case 0:  __asm__ __volatile__ ("mtc1\t%0,$0\n\tmtc1\t%1,$1"::"r"(val),"r"(val2)); break;
+	case 2:  __asm__ __volatile__ ("mtc1\t%0,$2\n\tmtc1\t%1,$3"::"r"(val),"r"(val2)); break;
+	case 4:  __asm__ __volatile__ ("mtc1\t%0,$4\n\tmtc1\t%1,$5"::"r"(val),"r"(val2)); break;
+	case 6:  __asm__ __volatile__ ("mtc1\t%0,$6\n\tmtc1\t%1,$7"::"r"(val),"r"(val2)); break;
+	case 8:  __asm__ __volatile__ ("mtc1\t%0,$8\n\tmtc1\t%1,$9"::"r"(val),"r"(val2)); break;
+	case 10: __asm__ __volatile__ ("mtc1\t%0,$10\n\tmtc1\t%1,$11"::"r"(val),"r"(val2)); break;
+	case 12: __asm__ __volatile__ ("mtc1\t%0,$12\n\tmtc1\t%1,$13"::"r"(val),"r"(val2)); break;
+	case 14: __asm__ __volatile__ ("mtc1\t%0,$14\n\tmtc1\t%1,$15"::"r"(val),"r"(val2)); break;
+	case 16: __asm__ __volatile__ ("mtc1\t%0,$16\n\tmtc1\t%1,$17"::"r"(val),"r"(val2)); break;
+	case 18: __asm__ __volatile__ ("mtc1\t%0,$18\n\tmtc1\t%1,$19"::"r"(val),"r"(val2)); break;
+	case 20: __asm__ __volatile__ ("mtc1\t%0,$20\n\tmtc1\t%1,$21"::"r"(val),"r"(val2)); break;
+	case 22: __asm__ __volatile__ ("mtc1\t%0,$22\n\tmtc1\t%1,$23"::"r"(val),"r"(val2)); break;
+	case 24: __asm__ __volatile__ ("mtc1\t%0,$24\n\tmtc1\t%1,$25"::"r"(val),"r"(val2)); break;
+	case 26: __asm__ __volatile__ ("mtc1\t%0,$26\n\tmtc1\t%1,$27"::"r"(val),"r"(val2)); break;
+	case 28: __asm__ __volatile__ ("mtc1\t%0,$28\n\tmtc1\t%1,$29"::"r"(val),"r"(val2)); break;
+	case 30: __asm__ __volatile__ ("mtc1\t%0,$30\n\tmtc1\t%1,$31"::"r"(val),"r"(val2)); break;
+#endif
+	}
+}
+
+static inline void mfc1_pair(unsigned long *val, unsigned long *val2, unsigned reg)
+{
+	unsigned long uninitialized_var(lval), uninitialized_var(lval2);
+
+	switch (reg & ~0x1) {
+#ifdef __BIG_ENDIAN
+	case 0:  __asm__ __volatile__ ("mfc1\t%0,$0\n\tmfc1\t%1,$1":"=r"(lval2),"=r"(lval)); break;
+	case 2:  __asm__ __volatile__ ("mfc1\t%0,$2\n\tmfc1\t%1,$3":"=r"(lval2),"=r"(lval)); break;
+	case 4:  __asm__ __volatile__ ("mfc1\t%0,$4\n\tmfc1\t%1,$5":"=r"(lval2),"=r"(lval)); break;
+	case 6:  __asm__ __volatile__ ("mfc1\t%0,$6\n\tmfc1\t%1,$7":"=r"(lval2),"=r"(lval)); break;
+	case 8:  __asm__ __volatile__ ("mfc1\t%0,$8\n\tmfc1\t%1,$9":"=r"(lval2),"=r"(lval)); break;
+	case 10: __asm__ __volatile__ ("mfc1\t%0,$10\n\tmfc1\t%1,$11":"=r"(lval2),"=r"(lval)); break;
+	case 12: __asm__ __volatile__ ("mfc1\t%0,$12\n\tmfc1\t%1,$13":"=r"(lval2),"=r"(lval)); break;
+	case 14: __asm__ __volatile__ ("mfc1\t%0,$14\n\tmfc1\t%1,$15":"=r"(lval2),"=r"(lval)); break;
+	case 16: __asm__ __volatile__ ("mfc1\t%0,$16\n\tmfc1\t%1,$17":"=r"(lval2),"=r"(lval)); break;
+	case 18: __asm__ __volatile__ ("mfc1\t%0,$18\n\tmfc1\t%1,$19":"=r"(lval2),"=r"(lval)); break;
+	case 20: __asm__ __volatile__ ("mfc1\t%0,$20\n\tmfc1\t%1,$21":"=r"(lval2),"=r"(lval)); break;
+	case 22: __asm__ __volatile__ ("mfc1\t%0,$22\n\tmfc1\t%1,$23":"=r"(lval2),"=r"(lval)); break;
+	case 24: __asm__ __volatile__ ("mfc1\t%0,$24\n\tmfc1\t%1,$25":"=r"(lval2),"=r"(lval)); break;
+	case 26: __asm__ __volatile__ ("mfc1\t%0,$26\n\tmfc1\t%1,$27":"=r"(lval2),"=r"(lval)); break;
+	case 28: __asm__ __volatile__ ("mfc1\t%0,$28\n\tmfc1\t%1,$29":"=r"(lval2),"=r"(lval)); break;
+	case 30: __asm__ __volatile__ ("mfc1\t%0,$30\n\tmfc1\t%1,$31":"=r"(lval2),"=r"(lval)); break;
+#endif
+#ifdef __LITTLE_ENDIAN
+	case 0:  __asm__ __volatile__ ("mfc1\t%0,$0\n\tmfc1\t%1,$1":"=r"(lval),"=r"(lval2)); break;
+	case 2:  __asm__ __volatile__ ("mfc1\t%0,$2\n\tmfc1\t%1,$3":"=r"(lval),"=r"(lval2)); break;
+	case 4:  __asm__ __volatile__ ("mfc1\t%0,$4\n\tmfc1\t%1,$5":"=r"(lval),"=r"(lval2)); break;
+	case 6:  __asm__ __volatile__ ("mfc1\t%0,$6\n\tmfc1\t%1,$7":"=r"(lval),"=r"(lval2)); break;
+	case 8:  __asm__ __volatile__ ("mfc1\t%0,$8\n\tmfc1\t%1,$9":"=r"(lval),"=r"(lval2)); break;
+	case 10: __asm__ __volatile__ ("mfc1\t%0,$10\n\tmfc1\t%1,$11":"=r"(lval),"=r"(lval2)); break;
+	case 12: __asm__ __volatile__ ("mfc1\t%0,$12\n\tmfc1\t%1,$13":"=r"(lval),"=r"(lval2)); break;
+	case 14: __asm__ __volatile__ ("mfc1\t%0,$14\n\tmfc1\t%1,$15":"=r"(lval),"=r"(lval2)); break;
+	case 16: __asm__ __volatile__ ("mfc1\t%0,$16\n\tmfc1\t%1,$17":"=r"(lval),"=r"(lval2)); break;
+	case 18: __asm__ __volatile__ ("mfc1\t%0,$18\n\tmfc1\t%1,$19":"=r"(lval),"=r"(lval2)); break;
+	case 20: __asm__ __volatile__ ("mfc1\t%0,$20\n\tmfc1\t%1,$21":"=r"(lval),"=r"(lval2)); break;
+	case 22: __asm__ __volatile__ ("mfc1\t%0,$22\n\tmfc1\t%1,$23":"=r"(lval),"=r"(lval2)); break;
+	case 24: __asm__ __volatile__ ("mfc1\t%0,$24\n\tmfc1\t%1,$25":"=r"(lval),"=r"(lval2)); break;
+	case 26: __asm__ __volatile__ ("mfc1\t%0,$26\n\tmfc1\t%1,$27":"=r"(lval),"=r"(lval2)); break;
+	case 28: __asm__ __volatile__ ("mfc1\t%0,$28\n\tmfc1\t%1,$29":"=r"(lval),"=r"(lval2)); break;
+	case 30: __asm__ __volatile__ ("mfc1\t%0,$30\n\tmfc1\t%1,$31":"=r"(lval),"=r"(lval2)); break;
+#endif
+	}
+	*val = lval;
+	*val2 = lval2;
+}
+
+
 static void emulate_load_store_insn(struct pt_regs *regs,
 	void __user *addr, unsigned int __user *pc)
 {
@@ -429,6 +1005,9 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 	unsigned long origpc;
 	unsigned long orig31;
 	void __user *fault_addr = NULL;
+#ifdef CONFIG_EVA
+	mm_segment_t seg;
+#endif
 
 	origpc = (unsigned long)pc;
 	orig31 = regs->regs[31];
@@ -474,6 +1053,98 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 		 * The remaining opcodes are the ones that are really of
 		 * interest.
 		 */
+#ifdef CONFIG_EVA
+	case spec3_op:
+
+		/* we can land here only from kernel accessing USER,
+		   so - set user space, temporary for verification */
+		seg = get_fs();
+		set_fs(USER_DS);
+
+		switch (insn.spec3_format.ls_func) {
+
+		case lhe_op:
+			if (!access_ok(VERIFY_READ, addr, 2)) {
+				set_fs(seg);
+				goto sigbus;
+			}
+
+			LoadHW(addr, value, res);
+			if (res) {
+				set_fs(seg);
+				goto fault;
+			}
+			compute_return_epc(regs);
+			regs->regs[insn.spec3_format.rt] = value;
+			break;
+
+		case lwe_op:
+			if (!access_ok(VERIFY_READ, addr, 4)) {
+				set_fs(seg);
+				goto sigbus;
+			}
+
+			LoadW(addr, value, res);
+			if (res) {
+				set_fs(seg);
+				goto fault;
+			}
+			compute_return_epc(regs);
+			regs->regs[insn.spec3_format.rt] = value;
+			break;
+
+		case lhue_op:
+			if (!access_ok(VERIFY_READ, addr, 2)) {
+				set_fs(seg);
+				goto sigbus;
+			}
+
+			LoadHWU(addr, value, res);
+			if (res) {
+				set_fs(seg);
+				goto fault;
+			}
+			compute_return_epc(regs);
+			regs->regs[insn.spec3_format.rt] = value;
+			break;
+
+		case she_op:
+			if (!access_ok(VERIFY_WRITE, addr, 2)) {
+				set_fs(seg);
+				goto sigbus;
+			}
+
+			compute_return_epc(regs);
+			value = regs->regs[insn.spec3_format.rt];
+			StoreHW(addr, value, res);
+			if (res) {
+				set_fs(seg);
+				goto fault;
+			}
+			break;
+
+		case swe_op:
+			if (!access_ok(VERIFY_WRITE, addr, 4)) {
+				set_fs(seg);
+				goto sigbus;
+			}
+
+			compute_return_epc(regs);
+			value = regs->regs[insn.spec3_format.rt];
+			StoreW(addr, value, res);
+			if (res) {
+				set_fs(seg);
+				goto fault;
+			}
+			break;
+
+		default:
+			set_fs(seg);
+			goto sigill;
+		}
+		set_fs(seg);
+		break;
+#endif
 	case lh_op:
 		if (!access_ok(VERIFY_READ, addr, 2))
 			goto sigbus;
@@ -598,13 +1269,99 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 		/* Cannot handle 64-bit instructions in 32-bit kernel */
 		goto sigill;
 
-	case lwc1_op:
 	case ldc1_op:
-	case swc1_op:
+		if (!access_ok(VERIFY_READ, addr, 8))
+			goto sigbus;
+
+		preempt_disable();
+		if (is_fpu_owner()) {
+			if (read_c0_status() & ST0_FR) {
+#ifdef CONFIG_64BIT
+				LoadDW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				dmtc1(value, insn.i_format.rt);
+#else /* !CONFIG_64BIT */
+				unsigned long value2;
+
+				LoadW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				LoadW((addr + 4), value2, res);
+				if (res)
+					goto preempt_fault;
+				mtc1_mthc1(value, value2, insn.i_format.rt);
+#endif /* CONFIG_64BIT */
+			} else {
+				unsigned long value2;
+
+				LoadW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				LoadW((addr + 4), value2, res);
+				if (res)
+					goto preempt_fault;
+				mtc1_pair(value, value2, insn.i_format.rt);
+			}
+			preempt_enable();
+			compute_return_epc(regs);
+			break;
+		}
+
+		preempt_enable();
+		goto fpu_continue;
+
 	case sdc1_op:
+		if (!access_ok(VERIFY_WRITE, addr, 8))
+			goto sigbus;
+
+		preempt_disable();
+		if (is_fpu_owner()) {
+			compute_return_epc(regs);
+			if (read_c0_status() & ST0_FR) {
+#ifdef CONFIG_64BIT
+				value = dmfc1(insn.i_format.rt);
+				StoreDW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+#else /* !CONFIG_64BIT */
+				unsigned long value2;
+
+				mfc1_mfhc1(&value, &value2, insn.i_format.rt);
+				StoreW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				StoreW((addr + 4), value2, res);
+				if (res)
+					goto preempt_fault;
+#endif /* CONFIG_64BIT */
+			} else {
+				unsigned long value2;
+
+				mfc1_pair(&value, &value2, insn.i_format.rt);
+				StoreW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				StoreW((addr + 4), value2, res);
+				if (res)
+					goto preempt_fault;
+			}
+			preempt_enable();
+			break;
+		}
+
+preempt_fault:
+		preempt_enable();
+		goto fpu_continue;
+
+	case ldxc1_op:
+	case sdxc1_op:
+	case lwc1_op:
+	case swc1_op:
+fpu_continue:
 		die_if_kernel("Unaligned FP access in kernel code", regs);
 		BUG_ON(!used_math());
-		BUG_ON(!is_fpu_owner());
+//                BUG_ON(!is_fpu_owner());
 
 		lose_fpu(1);	/* Save FPU state for the emulator. */
 		res = fpu_emulator_cop1Handler(regs, &current->thread.fpu, 1,
@@ -1025,7 +1782,90 @@ void emulate_load_store_microMIPS(struct pt_regs *regs, void __user * addr)
 		goto sigbus;
 
 	case mm_ldc132_op:
+		if (!access_ok(VERIFY_READ, addr, 8))
+			goto sigbus;
+
+		if ((unsigned long)addr & 0x3)
+			goto fpu_emul;  /* generic case */
+
+		preempt_disable();
+		if (is_fpu_owner()) {
+			if (read_c0_status() & ST0_FR) {
+#ifdef CONFIG_64BIT
+				LoadDW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				dmtc1(value, insn.mm_i_format.rt);
+#else /* !CONFIG_64BIT */
+				unsigned long value2;
+
+				LoadW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				LoadW((addr + 4), value2, res);
+				if (res)
+					goto preempt_fault;
+				mtc1_mthc1(value, value2, insn.mm_i_format.rt);
+#endif /* CONFIG_64BIT */
+			} else {
+				unsigned long value2;
+
+				LoadW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				LoadW((addr + 4), value2, res);
+				if (res)
+					goto preempt_fault;
+				mtc1_pair(value, value2, insn.mm_i_format.rt);
+			}
+			preempt_enable();
+			goto success;
+		}
+
+		preempt_enable();
+		goto fpu_emul;
+
 	case mm_sdc132_op:
+		if (!access_ok(VERIFY_WRITE, addr, 8))
+			goto sigbus;
+
+		preempt_disable();
+		if (is_fpu_owner()) {
+			if (read_c0_status() & ST0_FR) {
+#ifdef CONFIG_64BIT
+				value = dmfc1(insn.mm_i_format.rt);
+				StoreDW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+#else /* !CONFIG_64BIT */
+				unsigned long value2;
+
+				mfc1_mfhc1(&value, &value2, insn.mm_i_format.rt);
+				StoreW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				StoreW((addr + 4), value2, res);
+				if (res)
+					goto preempt_fault;
+#endif /* CONFIG_64BIT */
+			} else {
+				unsigned long value2;
+
+				mfc1_pair(&value, &value2, insn.mm_i_format.rt);
+				StoreW(addr, value, res);
+				if (res)
+					goto preempt_fault;
+				StoreW((addr + 4), value2, res);
+				if (res)
+					goto preempt_fault;
+			}
+			preempt_enable();
+			goto success;
+		}
+
+		preempt_enable();
+		goto fpu_emul;
+
 	case mm_lwc132_op:
 	case mm_swc132_op:
 fpu_emul:
@@ -1279,6 +2119,8 @@ success:
 #endif
 	return;
 
+preempt_fault:
+	preempt_enable();
 fault:
 	/* roll back jump/branch */
 	regs->cp0_epc = origpc;

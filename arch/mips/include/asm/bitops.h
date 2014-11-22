@@ -28,6 +28,8 @@
 #define __SC		"sc	"
 #define __INS		"ins	"
 #define __EXT		"ext	"
+#define __ADDU          "addu   "
+#define __SUBU          "subu   "
 #elif _MIPS_SZLONG == 64
 #define SZLONG_LOG 6
 #define SZLONG_MASK 63UL
@@ -35,6 +37,8 @@
 #define __SC		"scd	"
 #define __INS		"dins	 "
 #define __EXT		"dext	 "
+#define __ADDU          "daddu   "
+#define __SUBU          "dsubu   "
 #endif
 
 /*

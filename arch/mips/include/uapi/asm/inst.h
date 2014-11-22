@@ -74,8 +74,16 @@ enum spec3_op {
 	ext_op, dextm_op, dextu_op, dext_op,
 	ins_op, dinsm_op, dinsu_op, dins_op,
 	lx_op = 0x0a,
-	bshfl_op = 0x20,
+	lwle_op = 0x19,
+	lwre_op = 0x1a, cachee_op = 0x1b,
+	sbe_op = 0x1c, she_op = 0x1d,
+	sce_op = 0x1e, swe_op = 0x1f,
+	bshfl_op = 0x20, swle_op = 0x21,
+	swre_op = 0x22, prefe_op = 0x23,
 	dbshfl_op = 0x24,
+	lbue_op = 0x28, lhue_op = 0x29,
+	lbe_op = 0x2c, lhe_op = 0x2d,
+	lle_op = 0x2e, lwe_op = 0x2f,
 	rdhwr_op = 0x3b
 };
 
@@ -98,8 +106,9 @@ enum rt_op {
  */
 enum cop_op {
 	mfc_op	      = 0x00, dmfc_op	    = 0x01,
-	cfc_op	      = 0x02, mtc_op	    = 0x04,
-	dmtc_op	      = 0x05, ctc_op	    = 0x06,
+	cfc_op	      = 0x02, mfhc_op	    = 0x03,
+	mtc_op        = 0x04, dmtc_op	    = 0x05,
+	ctc_op	      = 0x06, mthc_op	    = 0x07,
 	bc_op	      = 0x08, cop_op	    = 0x10,
 	copm_op	      = 0x18
 };
@@ -162,8 +171,8 @@ enum cop1_sdw_func {
  */
 enum cop1x_func {
 	lwxc1_op     =	0x00, ldxc1_op	   =  0x01,
-	pfetch_op    =	0x07, swxc1_op	   =  0x08,
-	sdxc1_op     =	0x09, madd_s_op	   =  0x20,
+	swxc1_op     =  0x08, sdxc1_op	   =  0x09,
+	pfetch_op    =	0x0f, madd_s_op	   =  0x20,
 	madd_d_op    =	0x21, madd_e_op	   =  0x22,
 	msub_s_op    =	0x28, msub_d_op	   =  0x29,
 	msub_e_op    =	0x2a, nmadd_s_op   =  0x30,
@@ -538,6 +547,15 @@ struct p_format {		/* Performance counter format (R10000) */
 	;))))))
 };
 
+struct spec3_format {   /* SPEC3 */
+	BITFIELD_FIELD(unsigned int opcode : 6,
+	BITFIELD_FIELD(unsigned int rs : 5,
+	BITFIELD_FIELD(unsigned int rt : 5,
+	BITFIELD_FIELD(signed int simmediate : 9,
+	BITFIELD_FIELD(unsigned int ls_func : 7,
+	;)))))
+};
+
 struct f_format {			/* FPU register format */
 	BITFIELD_FIELD(unsigned int opcode : 6,
 	BITFIELD_FIELD(unsigned int : 1,
@@ -854,6 +872,7 @@ union mips_instruction {
 	struct c_format c_format;
 	struct r_format r_format;
 	struct p_format p_format;
+	struct spec3_format spec3_format;
 	struct f_format f_format;
 	struct ma_format ma_format;
 	struct b_format b_format;

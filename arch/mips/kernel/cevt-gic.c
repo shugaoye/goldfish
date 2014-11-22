@@ -65,7 +65,7 @@ int __cpuinit gic_clockevent_init(void)
 	struct clock_event_device *cd;
 	unsigned int irq;
 
-	if (!cpu_has_counter || !gic_frequency)
+	if (!gic_frequency)
 		return -ENXIO;
 
 	irq = MIPS_GIC_IRQ_BASE;
@@ -81,7 +81,7 @@ int __cpuinit gic_clockevent_init(void)
 	cd->max_delta_ns	= clockevent_delta2ns(0x7fffffff, cd);
 	cd->min_delta_ns	= clockevent_delta2ns(0x300, cd);
 
-	cd->rating		= 300;
+	cd->rating              = 350;
 	cd->irq			= irq;
 	cd->cpumask		= cpumask_of(cpu);
 	cd->set_next_event	= gic_next_event;

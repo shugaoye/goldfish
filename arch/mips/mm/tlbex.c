@@ -440,6 +440,7 @@ static void __cpuinit build_r3000_tlb_refill_handler(void)
 		 (unsigned int)(p - tlb_handler));
 
 	memcpy((void *)ebase, tlb_handler, 0x80);
+	local_flush_icache_range(ebase, ebase + 0x80);
 
 	dump_handler("r3000_tlb_refill", (u32 *)ebase, 32);
 }
@@ -517,14 +518,21 @@ static void __cpuinit build_tlb_write_entry(u32 **p, struct uasm_label **l,
 		 * but a number of cores do not have the hazard and
 		 * using an ehb causes an expensive pipeline stall.
 		 */
-		switch (current_cpu_type()) {
-		case CPU_M14KC:
-		case CPU_74K:
-			break;
+		if (cpu_has_mips_r2_exec_hazard) {
+			switch (current_cpu_type()) {
+			case CPU_M14KC:
+			case CPU_M14KEC:
+			case CPU_74K:
+			case CPU_PROAPTIV:
+			case CPU_INTERAPTIV:
+			case CPU_VIRTUOSO:
+			case CPU_P5600:
+				break;
 
-		default:
-			uasm_i_ehb(p);
-			break;
+			default:
+				uasm_i_ehb(p);
+				break;
+			}
 		}
 		tlbw(p);
 		return;
@@ -973,9 +981,17 @@ build_get_pgde32(u32 **p, unsigned int tmp, unsigned int ptr)
 #endif
 	uasm_i_mfc0(p, tmp, C0_BADVADDR); /* get faulting address */
 	uasm_i_lw(p, ptr, uasm_rel_lo(pgdc), ptr);
+
+	if (cpu_has_mips32r2) {
+		uasm_i_ext(p, tmp, tmp, PGDIR_SHIFT, (32 - PGDIR_SHIFT));
+		uasm_i_ins(p, ptr, tmp, PGD_T_LOG2, (32 - PGDIR_SHIFT));
+		return;
+	}
+
 	uasm_i_srl(p, tmp, tmp, PGDIR_SHIFT); /* get pgd only bits */
 	uasm_i_sll(p, tmp, tmp, PGD_T_LOG2);
 	uasm_i_addu(p, ptr, ptr, tmp); /* add in pgd offset */
+
 }
 
 #endif /* !CONFIG_64BIT */
@@ -1008,6 +1024,17 @@ static void __cpuinit build_adjust_context(u32 **p, unsigned int ctx)
 
 static void __cpuinit build_get_ptep(u32 **p, unsigned int tmp, unsigned int ptr)
 {
+#ifndef CONFIG_64BIT
+	if (cpu_has_mips_r2) {
+		/* For MIPS32R2, PTE ptr offset is obtained from BadVAddr */
+		UASM_i_MFC0(p, tmp, C0_BADVADDR);
+		UASM_i_LW(p, ptr, 0, ptr);
+		uasm_i_ext(p, tmp, tmp, PAGE_SHIFT+1, PGDIR_SHIFT-PAGE_SHIFT-1);
+		uasm_i_ins(p, ptr, tmp, PTE_T_LOG2+1, PGDIR_SHIFT-PAGE_SHIFT-1);
+		return;
+	}
+#endif /* CONFIG_64BIT */
+
 	/*
 	 * Bug workaround for the Nevada. It seems as if under certain
 	 * circumstances the move from cp0_context might produce a
@@ -1440,6 +1467,7 @@ static void __cpuinit build_r4000_tlb_refill_handler(void)
 		 final_len);
 
 	memcpy((void *)ebase, final_handler, 0x100);
+	local_flush_icache_range(ebase, ebase + 0x100);
 
 	dump_handler("r4000_tlb_refill", (u32 *)ebase, 64);
 }

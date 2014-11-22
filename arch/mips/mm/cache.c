@@ -33,8 +33,8 @@ void (*flush_cache_page)(struct vm_area_struct *vma, unsigned long page,
 void (*flush_icache_range)(unsigned long start, unsigned long end);
 void (*local_flush_icache_range)(unsigned long start, unsigned long end);
 
-void (*__flush_cache_vmap)(void);
-void (*__flush_cache_vunmap)(void);
+void (*__flush_cache_vmap)(unsigned long start, unsigned long end);
+void (*__flush_cache_vunmap)(unsigned long start, unsigned long end);
 
 void (*__flush_kernel_vmap_range)(unsigned long vaddr, int size);
 void (*__invalidate_kernel_vmap_range)(unsigned long vaddr, int size);
@@ -45,10 +45,14 @@ EXPORT_SYMBOL_GPL(__flush_kernel_vmap_range);
 void (*flush_cache_sigtramp)(unsigned long addr);
 void (*local_flush_data_cache_page)(void * addr);
 void (*flush_data_cache_page)(unsigned long addr);
+void (*mips_flush_data_cache_range)(struct vm_area_struct *vma,
+      unsigned long vaddr, struct page *page, unsigned long addr,
+      unsigned long size);
 void (*flush_icache_all)(void);
 
 EXPORT_SYMBOL_GPL(local_flush_data_cache_page);
 EXPORT_SYMBOL(flush_data_cache_page);
+EXPORT_SYMBOL(mips_flush_data_cache_range);
 EXPORT_SYMBOL(flush_icache_all);
 
 #ifdef CONFIG_DMA_NONCOHERENT

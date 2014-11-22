@@ -116,6 +116,11 @@ static inline void kmap_coherent_init(void) {}
 
 void *kmap_coherent(struct page *page, unsigned long addr)
 {
+#ifdef CONFIG_EVA
+	dump_stack();
+	panic("kmap_coherent");
+#else
+
 	enum fixed_addresses idx;
 	unsigned long vaddr, flags, entrylo;
 	unsigned long old_ctx;
@@ -123,7 +128,6 @@ void *kmap_coherent(struct page *page, unsigned long addr)
 	int tlbidx;
 
 	/* BUG_ON(Page_dcache_dirty(page)); - removed for I-cache flush */
-
 	inc_preempt_count();
 	idx = (addr >> PAGE_SHIFT) & (FIX_N_COLOURS - 1);
 #ifdef CONFIG_MIPS_MT_SMTC
@@ -169,9 +173,11 @@ void *kmap_coherent(struct page *page, unsigned long addr)
 	EXIT_CRITICAL(flags);
 
 	return (void*) vaddr;
+#endif /* CONFIG_EVA */
 }
 
-#define UNIQUE_ENTRYHI(idx) (CKSEG0 + ((idx) << (PAGE_SHIFT + 1)))
+#define UNIQUE_ENTRYHI(idx) (cpu_has_tlbinv ? ((CKSEG0 + ((idx) << (PAGE_SHIFT + 1))) | MIPS_EHINV) : \
+			     (CKSEG0 + ((idx) << (PAGE_SHIFT + 1))))
 
 void kunmap_coherent(void)
 {
@@ -231,11 +237,12 @@ void copy_to_user_page(struct vm_area_struct *vma,
 	struct page *page, unsigned long vaddr, void *dst, const void *src,
 	unsigned long len)
 {
+	void *vto = NULL;
+
 	if (cpu_has_dc_aliases &&
 	    page_mapped(page) && !Page_dcache_dirty(page)) {
-		void *vto = kmap_coherent(page, vaddr) + (vaddr & ~PAGE_MASK);
+		vto = kmap_coherent(page, vaddr) + (vaddr & ~PAGE_MASK);
 		memcpy(vto, src, len);
-		kunmap_coherent();
 	} else {
 		memcpy(dst, src, len);
 		if (cpu_has_dc_aliases)
@@ -245,10 +252,14 @@ void copy_to_user_page(struct vm_area_struct *vma,
 	    (Page_dcache_dirty(page) &&
 	     pages_do_alias((unsigned long)dst & PAGE_MASK,
 			    vaddr & PAGE_MASK))) {
-		flush_cache_page(vma, vaddr, page_to_pfn(page));
+		mips_flush_data_cache_range(vma, vaddr, page,
+			vto?(unsigned long)vto : (unsigned long)dst, len);
+
 		if (cpu_has_dc_aliases)
 			ClearPageDcacheDirty(page);
 	}
+	if (vto)
+		kunmap_coherent();
 }
 
 void copy_from_user_page(struct vm_area_struct *vma,
@@ -263,6 +274,7 @@ void copy_from_user_page(struct vm_area_struct *vma,
 	} else
 		memcpy(dst, src, len);
 }
+EXPORT_SYMBOL_GPL(copy_from_user_page);
 
 void __init fixrange_init(unsigned long start, unsigned long end,
 	pgd_t *pgd_base)
@@ -281,11 +293,11 @@ void __init fixrange_init(unsigned long start, unsigned long end,
 	k = __pmd_offset(vaddr);
 	pgd = pgd_base + i;
 
-	for ( ; (i < PTRS_PER_PGD) && (vaddr < end); pgd++, i++) {
+	for ( ; (i < PTRS_PER_PGD) && (vaddr != end); pgd++, i++) {
 		pud = (pud_t *)pgd;
-		for ( ; (j < PTRS_PER_PUD) && (vaddr < end); pud++, j++) {
+		for ( ; (j < PTRS_PER_PUD) && (vaddr != end); pud++, j++) {
 			pmd = (pmd_t *)pud;
-			for (; (k < PTRS_PER_PMD) && (vaddr < end); pmd++, k++) {
+			for (; (k < PTRS_PER_PMD) && (vaddr != end); pmd++, k++) {
 				if (pmd_none(*pmd)) {
 					pte = (pte_t *) alloc_bootmem_low_pages(PAGE_SIZE);
 					set_pmd(pmd, __pmd((unsigned long)pte));
@@ -448,7 +460,12 @@ void free_initrd_mem(unsigned long start, unsigned long end)
 void __init_refok free_initmem(void)
 {
 	prom_free_prom_memory();
+#ifdef CONFIG_EVA
+	free_init_pages("unused memory", __pa_symbol(&__init_begin),
+		__pa_symbol(&__init_end));
+#else
 	free_initmem_default(POISON_FREE_INITMEM);
+#endif
 }
 
 #ifndef CONFIG_MIPS_PGD_C0_CONTEXT

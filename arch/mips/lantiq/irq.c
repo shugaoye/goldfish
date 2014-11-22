@@ -438,6 +438,7 @@ int __init icu_of_init(struct device_node *node, struct device_node *parent)
 	arch_init_ipiirq(MIPS_CPU_IRQ_BASE + MIPS_CPU_IPI_RESCHED_IRQ,
 		&irq_resched);
 	arch_init_ipiirq(MIPS_CPU_IRQ_BASE + MIPS_CPU_IPI_CALL_IRQ, &irq_call);
+	mips_smp_c0_status_mask |= (IE_SW0 | IE_SW1);
 #endif
 
 #if !defined(CONFIG_MIPS_MT_SMP) && !defined(CONFIG_MIPS_MT_SMTC)

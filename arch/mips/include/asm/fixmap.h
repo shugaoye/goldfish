@@ -20,6 +20,7 @@
 #include <asm/kmap_types.h>
 #endif
 
+#ifndef CONFIG_EVA_3GB
 /*
  * Here we define all the compile-time 'special' virtual
  * addresses. The point is to have a constant address at
@@ -126,4 +127,5 @@ extern void fixrange_init(unsigned long start, unsigned long end,
 	pgd_t *pgd_base);
 
 
+#endif
 #endif

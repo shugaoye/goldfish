@@ -21,25 +21,49 @@
 
 static fw_memblock_t mdesc[FW_MAX_MEMBLOCKS];
 
-/* determined physical memory size, not overridden by command line args	 */
-unsigned long physical_memsize = 0L;
+#ifdef DEBUG
+static char *mtypes[3] = {
+	"Dont use memory",
+	"YAMON PROM memory",
+	"Free memmory",
+};
+#endif
 
-fw_memblock_t * __init fw_getmdesc(void)
+/* determined physical memory size, not overridden by command line args  */
+unsigned long physical_memsize = 0L;
+static unsigned newMapType;
+
+static inline fw_memblock_t * __init prom_getmdesc(void)
 {
-	char *memsize_str, *ptr;
-	unsigned int memsize;
+	char *memsize_str;
+	char *ememsize_str;
+	unsigned long memsize = 0;
+	unsigned long ememsize = 0;
+	char *ptr;
 	static char cmdline[COMMAND_LINE_SIZE] __initdata;
-	long val;
-	int tmp;
 
 	/* otherwise look in the environment */
 	memsize_str = fw_getenv("memsize");
-	if (!memsize_str) {
-		pr_warn("memsize not set in YAMON, set to default (32Mb)\n");
+#ifdef DEBUG
+	pr_debug("prom_memsize = %s\n", memsize_str);
+#endif
+	if (memsize_str)
+		memsize = simple_strtol(memsize_str, NULL, 0);
+	ememsize_str = fw_getenv("ememsize");
+#ifdef DEBUG
+	pr_debug("fw_ememsize = %s\n", ememsize_str);
+#endif
+	if (ememsize_str)
+		ememsize = simple_strtol(ememsize_str, NULL, 0);
+
+	if ((!memsize) && !ememsize) {
+		printk(KERN_WARNING
+		       "memsize not set in boot prom, set to default (32Mb)\n");
 		physical_memsize = 0x02000000;
 	} else {
-		tmp = kstrtol(memsize_str, 0, &val);
-		physical_memsize = (unsigned long)val;
+		physical_memsize = ememsize;
+		if (!physical_memsize)
+			physical_memsize = memsize;
 	}
 
 #ifdef CONFIG_CPU_BIG_ENDIAN
@@ -48,26 +72,54 @@ fw_memblock_t * __init fw_getmdesc(void)
 	physical_memsize -= PAGE_SIZE;
 #endif
 
+	memsize = 0;
 	/* Check the command line for a memsize directive that overrides
 	   the physical/default amount */
 	strcpy(cmdline, arcs_cmdline);
-	ptr = strstr(cmdline, "memsize=");
-	if (ptr && (ptr != cmdline) && (*(ptr - 1) != ' '))
-		ptr = strstr(ptr, " memsize=");
-
-	if (ptr)
-		memsize = memparse(ptr + 8, &ptr);
-	else
+	ptr = strstr(cmdline, " memsize=");
+	if (ptr && (ptr != cmdline))
+		memsize = memparse(ptr + 9, &ptr);
+	ptr = strstr(cmdline, " ememsize=");
+	if (ptr && (ptr != cmdline))
+		memsize = memparse(ptr + 10, &ptr);
+	if (!memsize) {
+		ptr = strstr(cmdline, "memsize=");
+		if (ptr && (ptr != cmdline))
+			memsize = memparse(ptr + 8, &ptr);
+		ptr = strstr(cmdline, "ememsize=");
+		if (ptr && (ptr != cmdline))
+			memsize = memparse(ptr + 9, &ptr);
+	}
+	if (!memsize)
 		memsize = physical_memsize;
+
+	if ((memsize == 0x10000000) && !ememsize)
+		if ((!ptr) || (ptr == cmdline)) {
+			printk("YAMON reports memsize=256M but doesn't report ememsize option\n");
+			printk("If you install > 256MB memory, upgrade YAMON or use boot option memsize=XXXM\n");
+		}
+	newMapType = *((unsigned int *)CKSEG1ADDR(0xbf403004));
+	printk("System Controller register = %0x\n",newMapType);
+	newMapType &= 0x100;    /* extract map type bit */
+#ifdef CONFIG_EVA_OLD_MALTA_MAP
+	if (newMapType)
+		panic("Malta board has new memory map layout but kernel is configured for legacy map\n");
+#endif
+#if (!defined(CONFIG_PHYS_ADDR_T_64BIT)) && !defined(CONFIG_HIGHMEM)
+	/* Don't use last 64KB - it is just for macros arithmetics overflow */
+	/* It is assumed that HIGHMEM lowmem map follows this rule too */
+	if (((unsigned long long)PHYS_OFFSET + (unsigned long long)memsize) > 0xffff0000ULL)
+		memsize = 0xffff0000ULL - (unsigned long long)PHYS_OFFSET;
+#endif
 
 	memset(mdesc, 0, sizeof(mdesc));
 
 	mdesc[0].type = fw_dontuse;
-	mdesc[0].base = 0x00000000;
+	mdesc[0].base = PHYS_OFFSET;
 	mdesc[0].size = 0x00001000;
 
 	mdesc[1].type = fw_code;
-	mdesc[1].base = 0x00001000;
+	mdesc[1].base = mdesc[0].base + 0x00001000UL;
 	mdesc[1].size = 0x000ef000;
 
 	/*
@@ -78,20 +130,52 @@ fw_memblock_t * __init fw_getmdesc(void)
 	 * devices.
 	 */
 	mdesc[2].type = fw_dontuse;
-	mdesc[2].base = 0x000f0000;
+	mdesc[2].base = mdesc[0].base + 0x000f0000UL;
 	mdesc[2].size = 0x00010000;
 
 	mdesc[3].type = fw_dontuse;
-	mdesc[3].base = 0x00100000;
-	mdesc[3].size = CPHYSADDR(PFN_ALIGN((unsigned long)&_end)) -
-		mdesc[3].base;
+	mdesc[3].base = mdesc[0].base + 0x00100000UL;
+	mdesc[3].size = CPHYSADDR(PFN_ALIGN((unsigned long)&_end)) - 0x00100000UL;
 
-	mdesc[4].type = fw_free;
-	mdesc[4].base = CPHYSADDR(PFN_ALIGN(&_end));
-	mdesc[4].size = memsize - mdesc[4].base;
+	/* this code assumes that PAGE_OFFSET == 0 and PHYS_OFFSET == n*512MB */
+	if ((memsize > 0x20000000) && !PHYS_OFFSET) {
+		/* first 256MB */
+		mdesc[4].type = fw_free;
+		mdesc[4].base = mdesc[0].base + CPHYSADDR(PFN_ALIGN(&_end));
+		mdesc[4].size = mdesc[0].base + 0x10000000 - CPHYSADDR(mdesc[4].base);
+
+		/* I/O hole ... */
+
+		/* the rest of memory (256MB behind hole is lost) */
+		mdesc[5].type = fw_free;
+		mdesc[5].base = mdesc[0].base + 0x20000000;
+		mdesc[5].size = memsize - 0x20000000;
+	} else {
+		/* limit to 256MB, exclude I/O hole */
+		if (!PHYS_OFFSET)
+			memsize = (memsize > 0x10000000)? 0x10000000 : memsize;
+
+		mdesc[4].type = fw_free;
+		mdesc[4].base = mdesc[0].base + CPHYSADDR(PFN_ALIGN(&_end));
+		mdesc[4].size = memsize - CPHYSADDR(mdesc[4].base);
+	}
 
 	return &mdesc[0];
 }
+
+#ifdef CONFIG_EVA
+#ifndef CONFIG_EVA_OLD_MALTA_MAP
+void __init prom_mem_check(int niocu)
+{
+	if (!newMapType) {
+		if (niocu && mdesc[5].size) {
+			printk(KERN_WARNING "Malta board has legacy memory map + IOCU, but kernel is configured for new map layout, restrict memsize to 256MB\n");
+			boot_mem_map.nr_map--;
+		}
+	}
+}
+#endif /* !CONFIG_EVA_OLD_MALTA_MAP */
+#endif /* CONFIG_EVA */
 
 static int __init fw_memtype_classify(unsigned int type)
 {
@@ -105,10 +189,30 @@ static int __init fw_memtype_classify(unsigned int type)
 	}
 }
 
+fw_memblock_t __init *fw_getmdesc(void)
+{
+	fw_memblock_t *p;
+
+	p = prom_getmdesc();
+	return p;
+}
+
 void __init fw_meminit(void)
 {
 	fw_memblock_t *p;
 
+#ifdef DEBUG
+	pr_debug("YAMON MEMORY DESCRIPTOR dump:\n");
+	p = fw_getmdesc();
+
+	while (p->size) {
+		int i = 0;
+		pr_debug("[%d,%p]: base<%08lx> size<%x> type<%s>\n",
+			 i, p, p->base, p->size, mtypes[p->type]);
+		p++;
+		i++;
+	}
+#endif
 	p = fw_getmdesc();
 
 	while (p->size) {

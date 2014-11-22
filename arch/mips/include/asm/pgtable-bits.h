@@ -55,16 +55,15 @@
  */
 #define _PAGE_PRESENT_SHIFT	6
 #define _PAGE_PRESENT		(1 << _PAGE_PRESENT_SHIFT)
-#define _PAGE_READ_SHIFT	7
-#define _PAGE_READ		(1 << _PAGE_READ_SHIFT)
-#define _PAGE_WRITE_SHIFT	8
-#define _PAGE_WRITE		(1 << _PAGE_WRITE_SHIFT)
-#define _PAGE_ACCESSED_SHIFT	9
-#define _PAGE_ACCESSED		(1 << _PAGE_ACCESSED_SHIFT)
-#define _PAGE_MODIFIED_SHIFT	10
+#define _PAGE_MODIFIED_SHIFT    7
 #define _PAGE_MODIFIED		(1 << _PAGE_MODIFIED_SHIFT)
-
-#define _PAGE_FILE		(1 << 10)
+#define _PAGE_FILE              (1 << _PAGE_MODIFIED_SHIFT)
+#define _PAGE_READ_SHIFT        8
+#define _PAGE_READ		(1 << _PAGE_READ_SHIFT)
+#define _PAGE_WRITE_SHIFT       9
+#define _PAGE_WRITE		(1 << _PAGE_WRITE_SHIFT)
+#define _PAGE_ACCESSED_SHIFT    10
+#define _PAGE_ACCESSED		(1 << _PAGE_ACCESSED_SHIFT)
 
 #elif defined(CONFIG_CPU_R3000) || defined(CONFIG_CPU_TX39XX)
 
@@ -75,16 +74,16 @@
  */
 #define _PAGE_PRESENT_SHIFT	0
 #define _PAGE_PRESENT		(1 <<  _PAGE_PRESENT_SHIFT)
-#define _PAGE_READ_SHIFT	1
-#define _PAGE_READ		(1 <<  _PAGE_READ_SHIFT)
-#define _PAGE_WRITE_SHIFT	2
-#define _PAGE_WRITE		(1 <<  _PAGE_WRITE_SHIFT)
-#define _PAGE_ACCESSED_SHIFT	3
-#define _PAGE_ACCESSED		(1 <<  _PAGE_ACCESSED_SHIFT)
-#define _PAGE_MODIFIED_SHIFT	4
+#define _PAGE_MODIFIED_SHIFT    1
 #define _PAGE_MODIFIED		(1 <<  _PAGE_MODIFIED_SHIFT)
-#define _PAGE_FILE_SHIFT	4
+#define _PAGE_FILE_SHIFT        1
 #define _PAGE_FILE		(1 <<  _PAGE_FILE_SHIFT)
+#define _PAGE_READ_SHIFT        2
+#define _PAGE_READ		(1 <<  _PAGE_READ_SHIFT)
+#define _PAGE_WRITE_SHIFT       3
+#define _PAGE_WRITE		(1 <<  _PAGE_WRITE_SHIFT)
+#define _PAGE_ACCESSED_SHIFT    4
+#define _PAGE_ACCESSED		(1 <<  _PAGE_ACCESSED_SHIFT)
 
 /*
  * And these are the hardware TLB bits
@@ -102,6 +101,8 @@
 #define _CACHE_MASK		(1 << _CACHE_UNCACHED_SHIFT)
 
 #else /* 'Normal' r4K case */
+
+#ifndef CONFIG_CPU_MIPSR2
 /*
  * When using the RI/XI bit support, we have 13 bits of flags below
  * the physical address. The RI/XI bits are placed such that a SRL 5
@@ -118,22 +119,24 @@
  */
 #define _PAGE_PRESENT_SHIFT	(0)
 #define _PAGE_PRESENT		(1 << _PAGE_PRESENT_SHIFT)
-#define _PAGE_READ_SHIFT	(cpu_has_rixi ? _PAGE_PRESENT_SHIFT : _PAGE_PRESENT_SHIFT + 1)
+#define _PAGE_MODIFIED_SHIFT    (_PAGE_PRESENT_SHIFT + 1)
+#define _PAGE_MODIFIED		(1 << _PAGE_MODIFIED_SHIFT)
+#define _PAGE_FILE_SHIFT        (_PAGE_MODIFIED_SHIFT)
+#define _PAGE_FILE		(_PAGE_MODIFIED)
+#define _PAGE_READ_SHIFT        \
+		(cpu_has_rixi ? _PAGE_MODIFIED_SHIFT : _PAGE_MODIFIED_SHIFT + 1)
 #define _PAGE_READ ({BUG_ON(cpu_has_rixi); 1 << _PAGE_READ_SHIFT; })
 #define _PAGE_WRITE_SHIFT	(_PAGE_READ_SHIFT + 1)
 #define _PAGE_WRITE		(1 << _PAGE_WRITE_SHIFT)
 #define _PAGE_ACCESSED_SHIFT	(_PAGE_WRITE_SHIFT + 1)
 #define _PAGE_ACCESSED		(1 << _PAGE_ACCESSED_SHIFT)
-#define _PAGE_MODIFIED_SHIFT	(_PAGE_ACCESSED_SHIFT + 1)
-#define _PAGE_MODIFIED		(1 << _PAGE_MODIFIED_SHIFT)
-#define _PAGE_FILE		(_PAGE_MODIFIED)
 
 #ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
 /* huge tlb page */
-#define _PAGE_HUGE_SHIFT	(_PAGE_MODIFIED_SHIFT + 1)
+#define _PAGE_HUGE_SHIFT        (_PAGE_ACCESSED_SHIFT + 1)
 #define _PAGE_HUGE		(1 << _PAGE_HUGE_SHIFT)
 #else
-#define _PAGE_HUGE_SHIFT	(_PAGE_MODIFIED_SHIFT)
+#define _PAGE_HUGE_SHIFT        (_PAGE_ACCESSED_SHIFT)
 #define _PAGE_HUGE		({BUG(); 1; })	/* Dummy value */
 #endif
 
@@ -154,7 +157,152 @@
 #define _PAGE_NO_READ_SHIFT	(cpu_has_rixi ? _PAGE_NO_EXEC_SHIFT + 1 : _PAGE_NO_EXEC_SHIFT)
 #define _PAGE_NO_READ		({BUG_ON(!cpu_has_rixi); 1 << _PAGE_NO_READ_SHIFT; })
 
-#define _PAGE_GLOBAL_SHIFT	(_PAGE_NO_READ_SHIFT + 1)
+#else /* CONFIG_CPU_MIPSR2 */
+
+/* static bits allocation in MIPS R2, two variants -
+   HUGE TLB in 64BIT kernel support or not.
+   RIXI support in both */
+
+#ifdef CONFIG_64BIT
+
+/*
+ * Low bits are: CCC D V G RI XI [S H] A W R M(=F) P
+ * TLB refill will do a ROTR 7/9 (in case of cpu_has_rixi),
+ * or SRL/DSRL 7/9 to strip low bits.
+ * PFN size in high bits is 49 or 51 bit --> 512TB or 4*512TB for 4KB pages
+ */
+
+#define _PAGE_PRESENT_SHIFT     (0)
+#define _PAGE_PRESENT		(1 << _PAGE_PRESENT_SHIFT)
+/* implemented in software */
+#define _PAGE_MODIFIED_SHIFT    (_PAGE_PRESENT_SHIFT + 1)
+#define _PAGE_MODIFIED		(1 << _PAGE_MODIFIED_SHIFT)
+/* set:pagecache unset:swap */
+#define _PAGE_FILE		(_PAGE_MODIFIED)
+/* implemented in software, should be unused if cpu_has_rixi. */
+#define _PAGE_READ_SHIFT        (_PAGE_MODIFIED_SHIFT + 1)
+#define _PAGE_READ              (1 << _PAGE_READ_SHIFT)
+/* implemented in software */
+#define _PAGE_WRITE_SHIFT	(_PAGE_READ_SHIFT + 1)
+#define _PAGE_WRITE		(1 << _PAGE_WRITE_SHIFT)
+/* implemented in software */
+#define _PAGE_ACCESSED_SHIFT	(_PAGE_WRITE_SHIFT + 1)
+#define _PAGE_ACCESSED		(1 << _PAGE_ACCESSED_SHIFT)
+
+#ifdef CONFIG_MIPS_HUGE_TLB_SUPPORT
+/* huge tlb page */
+#define _PAGE_HUGE_SHIFT        (_PAGE_ACCESSED_SHIFT + 1)
+#define _PAGE_HUGE		(1 << _PAGE_HUGE_SHIFT)
+#define _PAGE_SPLITTING_SHIFT	(_PAGE_HUGE_SHIFT + 1)
+#define _PAGE_SPLITTING		(1 << _PAGE_SPLITTING_SHIFT)
+#else
+#define _PAGE_HUGE_SHIFT        (_PAGE_ACCESSED_SHIFT)
+#define _PAGE_HUGE		({BUG(); 1; })	/* Dummy value */
+#define _PAGE_SPLITTING_SHIFT	(_PAGE_HUGE_SHIFT)
+#define _PAGE_SPLITTING		({BUG(); 1; })	/* Dummy value */
+#endif /* CONFIG_MIPS_HUGE_TLB_SUPPORT */
+
+/* Page cannot be executed */
+#define _PAGE_NO_EXEC_SHIFT     (_PAGE_SPLITTING_SHIFT + 1)
+#define _PAGE_NO_EXEC           (1 << _PAGE_NO_EXEC_SHIFT)
+
+/* Page cannot be read */
+#define _PAGE_NO_READ_SHIFT     (_PAGE_NO_EXEC_SHIFT + 1)
+#define _PAGE_NO_READ           (1 << _PAGE_NO_READ_SHIFT)
+
+#else /* !CONFIG_64BIT */
+
+#ifndef CONFIG_MIPS_HUGE_TLB_SUPPORT
+
+/*
+ * No HUGE page support
+ * Low bits are: CCC D V G RI(=R) XI A W M(=F) P
+ * TLB refill will do a ROTR 6 (in case of cpu_has_rixi),
+ * or SRL 6 to strip low bits.
+ * All 20 bits PFN are preserved in high bits (4GB in 4KB pages)
+ */
+
+#define _PAGE_PRESENT_SHIFT     (0)
+#define _PAGE_PRESENT		(1 << _PAGE_PRESENT_SHIFT)
+/* implemented in software */
+#define _PAGE_MODIFIED_SHIFT    (_PAGE_PRESENT_SHIFT + 1)
+#define _PAGE_MODIFIED		(1 << _PAGE_MODIFIED_SHIFT)
+/* set:pagecache unset:swap */
+#define _PAGE_FILE_SHIFT        (_PAGE_MODIFIED_SHIFT)
+#define _PAGE_FILE		(_PAGE_MODIFIED)
+/* implemented in software */
+#define _PAGE_WRITE_SHIFT       (_PAGE_MODIFIED_SHIFT + 1)
+#define _PAGE_WRITE		(1 << _PAGE_WRITE_SHIFT)
+/* implemented in software */
+#define _PAGE_ACCESSED_SHIFT	(_PAGE_WRITE_SHIFT + 1)
+#define _PAGE_ACCESSED		(1 << _PAGE_ACCESSED_SHIFT)
+
+/* huge tlb page dummies */
+#define _PAGE_HUGE_SHIFT        (_PAGE_ACCESSED_SHIFT)
+#define _PAGE_HUGE		({BUG(); 1; })	/* Dummy value */
+#define _PAGE_SPLITTING_SHIFT	(_PAGE_HUGE_SHIFT)
+#define _PAGE_SPLITTING		({BUG(); 1; })	/* Dummy value */
+
+/* Page cannot be executed */
+#define _PAGE_NO_EXEC_SHIFT     (_PAGE_SPLITTING_SHIFT + 1)
+#define _PAGE_NO_EXEC           (1 << _PAGE_NO_EXEC_SHIFT)
+
+/* Page cannot be read */
+#define _PAGE_NO_READ_SHIFT     (_PAGE_NO_EXEC_SHIFT + 1)
+#define _PAGE_NO_READ           (1 << _PAGE_NO_READ_SHIFT)
+
+/* implemented in software, should be unused if cpu_has_rixi. */
+#define _PAGE_READ_SHIFT        (_PAGE_NO_READ_SHIFT)
+#define _PAGE_READ              (1 << _PAGE_READ_SHIFT)
+
+#else /* CONFIG_MIPS_HUGE_TLB_SUPPORT */
+
+/*
+ * Low bits are: CCC D V G S H A W R M(=F) P
+ * No RIXI is enforced
+ * TLB refill will do a SRL 7,
+ * only 19 bits PFN are preserved in high bits (2GB in 4KB pages)
+ */
+
+#define _PAGE_PRESENT_SHIFT     (0)
+#define _PAGE_PRESENT		(1 << _PAGE_PRESENT_SHIFT)
+/* implemented in software */
+#define _PAGE_MODIFIED_SHIFT    (_PAGE_PRESENT_SHIFT + 1)
+#define _PAGE_MODIFIED		(1 << _PAGE_MODIFIED_SHIFT)
+/* set:pagecache unset:swap */
+#define _PAGE_FILE_SHIFT        (_PAGE_MODIFIED_SHIFT)
+#define _PAGE_FILE		(_PAGE_MODIFIED)
+/* implemented in software */
+#define _PAGE_READ_SHIFT        (_PAGE_MODIFIED_SHIFT + 1)
+#define _PAGE_READ              (1 << _PAGE_READ_SHIFT)
+/* implemented in software */
+#define _PAGE_WRITE_SHIFT       (_PAGE_READ_SHIFT + 1)
+#define _PAGE_WRITE		(1 << _PAGE_WRITE_SHIFT)
+/* implemented in software */
+#define _PAGE_ACCESSED_SHIFT	(_PAGE_WRITE_SHIFT + 1)
+#define _PAGE_ACCESSED		(1 << _PAGE_ACCESSED_SHIFT)
+
+/* huge tlb page... but no HUGE page support in MIPS32 yet */
+#define _PAGE_HUGE_SHIFT        (_PAGE_ACCESSED_SHIFT + 1)
+#define _PAGE_HUGE		(1 << _PAGE_HUGE_SHIFT)
+#define _PAGE_SPLITTING_SHIFT	(_PAGE_HUGE_SHIFT + 1)
+#define _PAGE_SPLITTING		(1 << _PAGE_SPLITTING_SHIFT)
+
+/* Page cannot be executed */
+#define _PAGE_NO_EXEC_SHIFT     (_PAGE_SPLITTING_SHIFT)
+#define _PAGE_NO_EXEC           ({BUG(); 1; })  /* Dummy value */
+/* Page cannot be read */
+#define _PAGE_NO_READ_SHIFT     (_PAGE_NO_EXEC_SHIFT)
+#define _PAGE_NO_READ           ({BUG(); 1; })  /* Dummy value */
+
+#endif /* CONFIG_MIPS_HUGE_TLB_SUPPORT */
+
+#endif /* CONFIG_64BIT */
+
+#endif /* !CONFIG_CPU_MIPSR2 */
+
+
+#define _PAGE_GLOBAL_SHIFT      (_PAGE_NO_READ_SHIFT + 1)
 #define _PAGE_GLOBAL		(1 << _PAGE_GLOBAL_SHIFT)
 
 #define _PAGE_VALID_SHIFT	(_PAGE_GLOBAL_SHIFT + 1)
@@ -190,6 +338,51 @@
 #define _PAGE_GLOBAL_SHIFT ilog2(_PAGE_GLOBAL)
 #endif
 
+/*
+ * Swap and File entries format definitions in PTE
+ * This constant definitions are here because it is linked with bit positions
+ * The real macros are still in pgtable-32/64.h
+ *
+ * There are 3 kind of format - 64BIT, generic 32BIT and 32BIT & 64BIT PA
+ */
+#define __SWP_TYPE_BITS_NUM     5
+#define __SWP_TYPE_MASK         ((1 << __SWP_TYPE_BITS_NUM) - 1)
+
+#if defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32)
+
+/*
+ * Two words PTE case:
+ * Bits 0 and 1 (V+G) of pte_high are taken, use the rest for the swaps and
+ * page offset...
+ * Bits F and P are in pte_low.
+ *
+ * Note: swp_entry_t or file entry are one word today (pte_high)
+ */
+#define __SWP_PTE_SKIP_BITS_NUM         2
+
+#elif defined(CONFIG_64BIT)
+/*
+ * Swap entry is located in high 32 bits of PTE
+ *
+ * File entry starts right from D bit
+ */
+#define __SWP_PTE_SKIP_BITS_NUM         32
+
+#else /* CONFIG_32BIT && !CONFIG_64BIT_PHYS_ADDR */
+/*
+ * Swap entry is encoded starting right from D bit
+ *
+ * File entry is encoded in all bits besides V,G,F and P which are grouped in
+ * two fields with variable gap, so - additonal location info is defined here
+ */
+/* rightmost taken out field - F and P */
+#define __FILE_PTE_LOW_BITS_NUM         2
+/* total number of taken out bits - V,G,F,P */
+#define __FILE_PTE_TOTAL_BITS_NUM       4
+/* mask for intermediate field which is used for encoding */
+#define __FILE_PTE_LOW_MASK     ((_PAGE_GLOBAL - 1) >> (_PAGE_FILE_SHIFT + 1))
+
+#endif /* defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32) */
 
 #ifndef __ASSEMBLY__
 /*

@@ -159,6 +159,8 @@
 	(GIC_SH_INTR_MAP_TO_VPE_BASE_OFS + (32 * (intr)) + (((vpe) / 32) * 4))
 #define GIC_SH_MAP_TO_VPE_REG_BIT(vpe)	(1 << ((vpe) % 32))
 
+#define GIC_DINT_OFS                    0x6000
+
 /* Convert an interrupt number to a byte offset/bit for multi-word registers */
 #define GIC_INTR_OFS(intr) (((intr) / 32)*4)
 #define GIC_INTR_BIT(intr) ((intr) % 32)
@@ -194,10 +196,12 @@
 #define GIC_VPE_WD_MAP_OFS		0x0040
 #define GIC_VPE_COMPARE_MAP_OFS		0x0044
 #define GIC_VPE_TIMER_MAP_OFS		0x0048
+#define GIC_VPE_FDEBUG_MAP_OFS          0x004c
 #define GIC_VPE_PERFCTR_MAP_OFS		0x0050
 #define GIC_VPE_SWINT0_MAP_OFS		0x0054
 #define GIC_VPE_SWINT1_MAP_OFS		0x0058
 #define GIC_VPE_OTHER_ADDR_OFS		0x0080
+#define GIC_VPE_ID_OFS                  0x0088
 #define GIC_VPE_WD_CONFIG0_OFS		0x0090
 #define GIC_VPE_WD_COUNT0_OFS		0x0094
 #define GIC_VPE_WD_INITIAL0_OFS		0x0098
@@ -216,6 +220,9 @@
 #define GIC_VPE_TENABLE_YQ_OFS		0x1004
 #define GIC_VPE_TENABLE_INT_31_0_OFS	0x1080
 #define GIC_VPE_TENABLE_INT_63_32_OFS	0x1084
+
+#define GIC_VPE_DINT_OFS                0x3000
+#define GIC_VPE_DEBUG_BREAK_OFS         0x3080
 
 /* User Mode Visible Section Register Map */
 #define GIC_UMV_SH_COUNTER_31_00_OFS	0x0000
@@ -351,7 +358,7 @@ struct gic_shared_intr_map {
 
 /* Local GIC interrupts. */
 #define GIC_INT_TMR		(GIC_CPU_INT5)
-#define GIC_INT_PERFCTR		(GIC_CPU_INT5)
+#define GIC_INT_PERFCTR         (GIC_CPU_INT4)
 
 /* Add 2 to convert non-EIC hardware interrupt to EIC vector number. */
 #define GIC_CPU_TO_VEC_OFFSET	(2)

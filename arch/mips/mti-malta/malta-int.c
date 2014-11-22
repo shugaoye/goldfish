@@ -46,9 +46,7 @@
 #include <asm/gcmpregs.h>
 #include <asm/setup.h>
 
-int gcmp_present = -1;
 static unsigned long _msc01_biu_base;
-static unsigned long _gcmp_base;
 static unsigned int ipi_map[NR_CPUS];
 
 static DEFINE_RAW_SPINLOCK(mips_irq_lock);
@@ -417,44 +415,6 @@ static struct gic_intr_map gic_intr_map[GIC_NUM_INTRS] = {
 };
 #undef X
 
-/*
- * GCMP needs to be detected before any SMP initialisation
- */
-int __init gcmp_probe(unsigned long addr, unsigned long size)
-{
-	if (mips_revision_sconid != MIPS_REVISION_SCON_ROCIT) {
-		gcmp_present = 0;
-		return gcmp_present;
-	}
-
-	if (gcmp_present >= 0)
-		return gcmp_present;
-
-	_gcmp_base = (unsigned long) ioremap_nocache(GCMP_BASE_ADDR, GCMP_ADDRSPACE_SZ);
-	_msc01_biu_base = (unsigned long) ioremap_nocache(MSC01_BIU_REG_BASE, MSC01_BIU_ADDRSPACE_SZ);
-	gcmp_present = (GCMPGCB(GCMPB) & GCMP_GCB_GCMPB_GCMPBASE_MSK) == GCMP_BASE_ADDR;
-
-	if (gcmp_present)
-		pr_debug("GCMP present\n");
-	return gcmp_present;
-}
-
-/* Return the number of IOCU's present */
-int __init gcmp_niocu(void)
-{
-  return gcmp_present ?
-    (GCMPGCB(GC) & GCMP_GCB_GC_NUMIOCU_MSK) >> GCMP_GCB_GC_NUMIOCU_SHF :
-    0;
-}
-
-/* Set GCMP region attributes */
-void __init gcmp_setregion(int region, unsigned long base,
-			   unsigned long mask, int type)
-{
-	GCMPGCBn(CMxBASE, region) = base;
-	GCMPGCBn(CMxMASK, region) = mask | type;
-}
-
 #if defined(CONFIG_MIPS_MT_SMP)
 static void __init fill_ipi_map1(int baseintr, int cpu, int cpupin)
 {
@@ -471,7 +431,7 @@ static void __init fill_ipi_map(void)
 {
 	int cpu;
 
-	for (cpu = 0; cpu < NR_CPUS; cpu++) {
+	for (cpu = 0; cpu < nr_cpu_ids; cpu++) {
 		fill_ipi_map1(gic_resched_int_base, cpu, GIC_CPU_INT1);
 		fill_ipi_map1(gic_call_int_base, cpu, GIC_CPU_INT2);
 	}
@@ -493,7 +453,8 @@ void __init arch_init_irq(void)
 
 	if (gcmp_present)  {
 		GCMPGCB(GICBA) = GIC_BASE_ADDR | GCMP_GCB_GICBA_EN_MSK;
-		gic_present = 1;
+		if (GCMPGCB(GICBA) & GCMP_GCB_GICBA_EN_MSK)
+			gic_present = 1;
 	} else {
 		if (mips_revision_sconid == MIPS_REVISION_SCON_ROCIT) {
 			_msc01_biu_base = (unsigned long)
@@ -572,12 +533,11 @@ void __init arch_init_irq(void)
 		/* FIXME */
 		int i;
 #if defined(CONFIG_MIPS_MT_SMP)
-		gic_call_int_base = GIC_NUM_INTRS - NR_CPUS;
-		gic_resched_int_base = gic_call_int_base - NR_CPUS;
+		gic_call_int_base = GIC_NUM_INTRS -
+			(NR_CPUS - nr_cpu_ids) * 2 - nr_cpu_ids;
+		gic_resched_int_base = gic_call_int_base - nr_cpu_ids;
 		fill_ipi_map();
 #endif
-		gic_init(GIC_BASE_ADDR, GIC_ADDRSPACE_SZ, gic_intr_map,
-				ARRAY_SIZE(gic_intr_map), MIPS_GIC_IRQ_BASE);
 		if (!gcmp_present) {
 			/* Enable the GIC */
 			i = REG(_msc01_biu_base, MSC01_SC_CFG);
@@ -585,24 +545,27 @@ void __init arch_init_irq(void)
 				(i | (0x1 << MSC01_SC_CFG_GICENA_SHF));
 			pr_debug("GIC Enabled\n");
 		}
+		gic_init(GIC_BASE_ADDR, GIC_ADDRSPACE_SZ, gic_intr_map,
+				ARRAY_SIZE(gic_intr_map), MIPS_GIC_IRQ_BASE);
 #if defined(CONFIG_MIPS_MT_SMP)
 		/* set up ipi interrupts */
 		if (cpu_has_vint) {
 			set_vi_handler(MIPSCPU_INT_IPI0, malta_ipi_irqdispatch);
 			set_vi_handler(MIPSCPU_INT_IPI1, malta_ipi_irqdispatch);
 		}
-		/* Argh.. this really needs sorting out.. */
-		printk("CPU%d: status register was %08x\n", smp_processor_id(), read_c0_status());
-		write_c0_status(read_c0_status() | STATUSF_IP3 | STATUSF_IP4);
-		printk("CPU%d: status register now %08x\n", smp_processor_id(), read_c0_status());
-		write_c0_status(0x1100dc00);
-		printk("CPU%d: status register frc %08x\n", smp_processor_id(), read_c0_status());
-		for (i = 0; i < NR_CPUS; i++) {
+		for (i = 0; i < nr_cpu_ids; i++) {
 			arch_init_ipiirq(MIPS_GIC_IRQ_BASE +
 					 GIC_RESCHED_INT(i), &irq_resched);
 			arch_init_ipiirq(MIPS_GIC_IRQ_BASE +
 					 GIC_CALL_INT(i), &irq_call);
 		}
+		set_c0_status(mips_smp_c0_status_mask |
+			      (0x100 << GIC_MIPS_CPU_IPI_RESCHED_IRQ) |
+			      (0x100 << GIC_MIPS_CPU_IPI_CALL_IRQ));
+		back_to_back_c0_hazard();
+		printk("CPU%d: status register %08x\n", smp_processor_id(), read_c0_status());
+		mips_smp_c0_status_mask |= ((0x100 << GIC_MIPS_CPU_IPI_RESCHED_IRQ) |
+					    (0x100 << GIC_MIPS_CPU_IPI_CALL_IRQ));
 #endif
 	} else {
 #if defined(CONFIG_MIPS_MT_SMP)
@@ -619,6 +582,8 @@ void __init arch_init_irq(void)
 			}
 			cpu_ipi_resched_irq = MIPS_CPU_IRQ_BASE + MIPS_CPU_IPI_RESCHED_IRQ;
 			cpu_ipi_call_irq = MIPS_CPU_IRQ_BASE + MIPS_CPU_IPI_CALL_IRQ;
+			mips_smp_c0_status_mask |= ((0x100 << MIPS_CPU_IPI_RESCHED_IRQ) |
+						    (0x100 << MIPS_CPU_IPI_CALL_IRQ));
 		}
 		arch_init_ipiirq(cpu_ipi_resched_irq, &irq_resched);
 		arch_init_ipiirq(cpu_ipi_call_irq, &irq_call);

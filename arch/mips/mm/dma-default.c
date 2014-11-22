@@ -22,7 +22,7 @@
 
 #include <dma-coherence.h>
 
-int coherentio = 0;	/* User defined DMA coherency from command line. */
+int coherentio = -1;    /* User defined DMA coherency is not defined yet. */
 EXPORT_SYMBOL_GPL(coherentio);
 int hw_coherentio = 0;	/* Actual hardware supported DMA coherency setting. */
 

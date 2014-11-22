@@ -18,7 +18,7 @@ enum fw_memtypes {
 
 typedef struct {
 	unsigned long base;	/* Within KSEG0 */
-	unsigned int size;	/* bytes */
+	unsigned long size;     /* bytes */
 	enum fw_memtypes type;	/* fw_memtypes */
 } fw_memblock_t;
 
