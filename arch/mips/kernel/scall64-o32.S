@@ -52,35 +52,13 @@ NESTED(handle_sys, PT_SIZE, sp)
 	sll	a2, a2, 0
 	sll	a3, a3, 0
 
-	dsll	t0, v0, 3		# offset into table
-	ld	t2, (sys_call_table - (__NR_O32_Linux * 8))(t0)
-
+	dsll	t0, v0, 4		# offset into table
+	ld	t2, (sys_call_table - (__NR_O32_Linux * 16))(t0)
+	ld	t3, (sys_call_table - (__NR_O32_Linux * 16) + 8)(t0) # >= 0 if we need stack arguments
 	sd	a3, PT_R26(sp)		# save a3 for syscall restarting
+	bgez	t3, stackargs
 
-	/*
-	 * More than four arguments.  Try to deal with it by copying the
-	 * stack arguments from the user stack to the kernel stack.
-	 * This Sucks (TM).
-	 *
-	 * We intentionally keep the kernel stack a little below the top of
-	 * userspace so we don't have to do a slower byte accurate check here.
-	 */
-	ld	t0, PT_R29(sp)		# get old user stack pointer
-	daddu	t1, t0, 32
-	bltz	t1, bad_stack
-
-1:	lw	a4, 16(t0)		# argument #5 from usp
-2:	lw	a5, 20(t0)		# argument #6 from usp
-3:	lw	a6, 24(t0)		# argument #7 from usp
-4:	lw	a7, 28(t0)		# argument #8 from usp (for indirect syscalls)
-
-	.section __ex_table,"a"
-	PTR	1b, bad_stack
-	PTR	2b, bad_stack
-	PTR	3b, bad_stack
-	PTR	4b, bad_stack
-	.previous
-
+stack_done:
 	li	t1, _TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT
 	LONG_L	t0, TI_FLAGS($28)	# syscall tracing enabled?
 	and	t0, t1, t0
@@ -101,6 +79,50 @@ NESTED(handle_sys, PT_SIZE, sp)
 o32_syscall_exit:
 	j	syscall_exit_partial
 
+/* ------------------------------------------------------------------------ */
+
+	/*
+	 * More than four arguments.  Try to deal with it by copying the
+	 * stack arguments from the user stack to the kernel stack.
+	 * This Sucks (TM).
+	 *
+	 */
+stackargs:
+	ld	t0, PT_R29(sp)		# get old user stack pointer
+
+	/*
+	 * We intentionally keep the kernel stack a little below the top of
+	 * userspace so we don't have to do a slower byte accurate check here.
+	 */
+	daddu	t1, t0, 32
+	bltz	t1, bad_stack
+
+	/* Ok, copy the args from the luser stack to the kernel stack.
+	 * t3 is the precomputed number of instruction bytes needed to
+	 * load or store arguments 6-8.
+	 */
+
+	dla	t1, 5f			# load up to 4 additional arguments
+	subu	t1, t3
+	.set	push
+	.set	noreorder
+	.set	nomacro
+	jr	t1
+	nop
+2:	lw	a7, 28(t0)		# argument #8 from usp
+3:	lw	a6, 24(t0)		# argument #7 from usp
+4:	lw	a5, 20(t0)		# argument #6 from usp
+5:
+	b stack_done
+1:	lw	a4, 16(t0)		# argument #5 from usp
+	.set pop
+
+	.section __ex_table,"a"
+	PTR	1b, bad_stack
+	PTR	2b, bad_stack
+	PTR	3b, bad_stack
+	PTR	4b, bad_stack
+	.previous
 /* ------------------------------------------------------------------------ */
 
 trace_a_syscall:
@@ -166,7 +188,7 @@ LEAF(sys32_syscall)
 	subu	t0, a0, __NR_O32_Linux	# check syscall number
 	sltiu	v0, t0, __NR_O32_Linux_syscalls + 1
 	beqz	t0, einval		# do not recurse
-	dsll	t1, t0, 3
+	dsll	t1, t0, 4
 	beqz	v0, einval
 	ld	t2, sys_call_table(t1)		# syscall routine
 
@@ -189,360 +211,382 @@ einval: li	v0, -ENOSYS
 	jr	ra
 	END(sys32_syscall)
 
+	/* We pre-compute the number of _instruction_ bytes needed to
+	   load or store the arguments 6-8. Negative values are ignored. */
+
+	.macro  sys function, nargs
+	PTR     \function
+	LONG    (\nargs << 2) - (5 << 2)
+	.endm
+
 	.align	3
 	.type	sys_call_table,@object
 sys_call_table:
-	PTR	sys32_syscall			/* 4000 */
-	PTR	sys_exit
-	PTR	__sys_fork
-	PTR	sys_read
-	PTR	sys_write
-	PTR	compat_sys_open			/* 4005 */
-	PTR	sys_close
-	PTR	sys_waitpid
-	PTR	sys_creat
-	PTR	sys_link
-	PTR	sys_unlink			/* 4010 */
-	PTR	compat_sys_execve
-	PTR	sys_chdir
-	PTR	compat_sys_time
-	PTR	sys_mknod
-	PTR	sys_chmod			/* 4015 */
-	PTR	sys_lchown
-	PTR	sys_ni_syscall
-	PTR	sys_ni_syscall			/* was sys_stat */
-	PTR	sys_lseek
-	PTR	sys_getpid			/* 4020 */
-	PTR	compat_sys_mount
-	PTR	sys_oldumount
-	PTR	sys_setuid
-	PTR	sys_getuid
-	PTR	compat_sys_stime		/* 4025 */
-	PTR	compat_sys_ptrace
-	PTR	sys_alarm
-	PTR	sys_ni_syscall			/* was sys_fstat */
-	PTR	sys_pause
-	PTR	compat_sys_utime		/* 4030 */
-	PTR	sys_ni_syscall
-	PTR	sys_ni_syscall
-	PTR	sys_access
-	PTR	sys_nice
-	PTR	sys_ni_syscall			/* 4035 */
-	PTR	sys_sync
-	PTR	sys_kill
-	PTR	sys_rename
-	PTR	sys_mkdir
-	PTR	sys_rmdir			/* 4040 */
-	PTR	sys_dup
-	PTR	sysm_pipe
-	PTR	compat_sys_times
-	PTR	sys_ni_syscall
-	PTR	sys_brk				/* 4045 */
-	PTR	sys_setgid
-	PTR	sys_getgid
-	PTR	sys_ni_syscall			/* was signal	2 */
-	PTR	sys_geteuid
-	PTR	sys_getegid			/* 4050 */
-	PTR	sys_acct
-	PTR	sys_umount
-	PTR	sys_ni_syscall
-	PTR	compat_sys_ioctl
-	PTR	compat_sys_fcntl		/* 4055 */
-	PTR	sys_ni_syscall
-	PTR	sys_setpgid
-	PTR	sys_ni_syscall
-	PTR	sys_olduname
-	PTR	sys_umask			/* 4060 */
-	PTR	sys_chroot
-	PTR	compat_sys_ustat
-	PTR	sys_dup2
-	PTR	sys_getppid
-	PTR	sys_getpgrp			/* 4065 */
-	PTR	sys_setsid
-	PTR	sys_32_sigaction
-	PTR	sys_sgetmask
-	PTR	sys_ssetmask
-	PTR	sys_setreuid			/* 4070 */
-	PTR	sys_setregid
-	PTR	sys32_sigsuspend
-	PTR	compat_sys_sigpending
-	PTR	sys_sethostname
-	PTR	compat_sys_setrlimit		/* 4075 */
-	PTR	compat_sys_getrlimit
-	PTR	compat_sys_getrusage
-	PTR	compat_sys_gettimeofday
-	PTR	compat_sys_settimeofday
-	PTR	sys_getgroups			/* 4080 */
-	PTR	sys_setgroups
-	PTR	sys_ni_syscall			/* old_select */
-	PTR	sys_symlink
-	PTR	sys_ni_syscall			/* was sys_lstat */
-	PTR	sys_readlink			/* 4085 */
-	PTR	sys_uselib
-	PTR	sys_swapon
-	PTR	sys_reboot
-	PTR	compat_sys_old_readdir
-	PTR	sys_mips_mmap			/* 4090 */
-	PTR	sys_munmap
-	PTR	compat_sys_truncate
-	PTR	compat_sys_ftruncate
-	PTR	sys_fchmod
-	PTR	sys_fchown			/* 4095 */
-	PTR	sys_getpriority
-	PTR	sys_setpriority
-	PTR	sys_ni_syscall
-	PTR	compat_sys_statfs
-	PTR	compat_sys_fstatfs		/* 4100 */
-	PTR	sys_ni_syscall			/* sys_ioperm */
-	PTR	compat_sys_socketcall
-	PTR	sys_syslog
-	PTR	compat_sys_setitimer
-	PTR	compat_sys_getitimer		/* 4105 */
-	PTR	compat_sys_newstat
-	PTR	compat_sys_newlstat
-	PTR	compat_sys_newfstat
-	PTR	sys_uname
-	PTR	sys_ni_syscall			/* sys_ioperm  *//* 4110 */
-	PTR	sys_vhangup
-	PTR	sys_ni_syscall			/* was sys_idle	 */
-	PTR	sys_ni_syscall			/* sys_vm86 */
-	PTR	compat_sys_wait4
-	PTR	sys_swapoff			/* 4115 */
-	PTR	compat_sys_sysinfo
-	PTR	compat_sys_ipc
-	PTR	sys_fsync
-	PTR	sys32_sigreturn
-	PTR	__sys_clone			/* 4120 */
-	PTR	sys_setdomainname
-	PTR	sys_newuname
-	PTR	sys_ni_syscall			/* sys_modify_ldt */
-	PTR	compat_sys_adjtimex
-	PTR	sys_mprotect			/* 4125 */
-	PTR	compat_sys_sigprocmask
-	PTR	sys_ni_syscall			/* was creat_module */
-	PTR	sys_init_module
-	PTR	sys_delete_module
-	PTR	sys_ni_syscall			/* 4130, get_kernel_syms */
-	PTR	sys_quotactl
-	PTR	sys_getpgid
-	PTR	sys_fchdir
-	PTR	sys_bdflush
-	PTR	sys_sysfs			/* 4135 */
-	PTR	sys_32_personality
-	PTR	sys_ni_syscall			/* for afs_syscall */
-	PTR	sys_setfsuid
-	PTR	sys_setfsgid
-	PTR	sys_32_llseek			/* 4140 */
-	PTR	compat_sys_getdents
-	PTR	compat_sys_select
-	PTR	sys_flock
-	PTR	sys_msync
-	PTR	compat_sys_readv		/* 4145 */
-	PTR	compat_sys_writev
-	PTR	sys_cacheflush
-	PTR	sys_cachectl
-	PTR	sys_sysmips
-	PTR	sys_ni_syscall			/* 4150 */
-	PTR	sys_getsid
-	PTR	sys_fdatasync
-	PTR	compat_sys_sysctl
-	PTR	sys_mlock
-	PTR	sys_munlock			/* 4155 */
-	PTR	sys_mlockall
-	PTR	sys_munlockall
-	PTR	sys_sched_setparam
-	PTR	sys_sched_getparam
-	PTR	sys_sched_setscheduler		/* 4160 */
-	PTR	sys_sched_getscheduler
-	PTR	sys_sched_yield
-	PTR	sys_sched_get_priority_max
-	PTR	sys_sched_get_priority_min
-	PTR	compat_sys_sched_rr_get_interval	/* 4165 */
-	PTR	compat_sys_nanosleep
-	PTR	sys_mremap
-	PTR	sys_accept
-	PTR	sys_bind
-	PTR	sys_connect			/* 4170 */
-	PTR	sys_getpeername
-	PTR	sys_getsockname
-	PTR	sys_getsockopt
-	PTR	sys_listen
-	PTR	compat_sys_recv			/* 4175 */
-	PTR	compat_sys_recvfrom
-	PTR	compat_sys_recvmsg
-	PTR	sys_send
-	PTR	compat_sys_sendmsg
-	PTR	sys_sendto			/* 4180 */
-	PTR	compat_sys_setsockopt
-	PTR	sys_shutdown
-	PTR	sys_socket
-	PTR	sys_socketpair
-	PTR	sys_setresuid			/* 4185 */
-	PTR	sys_getresuid
-	PTR	sys_ni_syscall			/* was query_module */
-	PTR	sys_poll
-	PTR	sys_ni_syscall			/* was nfsservctl */
-	PTR	sys_setresgid			/* 4190 */
-	PTR	sys_getresgid
-	PTR	sys_prctl
-	PTR	sys32_rt_sigreturn
-	PTR	compat_sys_rt_sigaction
-	PTR	compat_sys_rt_sigprocmask	/* 4195 */
-	PTR	compat_sys_rt_sigpending
-	PTR	compat_sys_rt_sigtimedwait
-	PTR	compat_sys_rt_sigqueueinfo
-	PTR	compat_sys_rt_sigsuspend
-	PTR	sys_32_pread			/* 4200 */
-	PTR	sys_32_pwrite
-	PTR	sys_chown
-	PTR	sys_getcwd
-	PTR	sys_capget
-	PTR	sys_capset			/* 4205 */
-	PTR	compat_sys_sigaltstack
-	PTR	compat_sys_sendfile
-	PTR	sys_ni_syscall
-	PTR	sys_ni_syscall
-	PTR	sys_mips_mmap2			/* 4210 */
-	PTR	sys_32_truncate64
-	PTR	sys_32_ftruncate64
-	PTR	sys_newstat
-	PTR	sys_newlstat
-	PTR	sys_newfstat			/* 4215 */
-	PTR	sys_pivot_root
-	PTR	sys_mincore
-	PTR	sys_madvise
-	PTR	sys_getdents64
-	PTR	compat_sys_fcntl64		/* 4220 */
-	PTR	sys_ni_syscall
-	PTR	sys_gettid
-	PTR	sys32_readahead
-	PTR	sys_setxattr
-	PTR	sys_lsetxattr			/* 4225 */
-	PTR	sys_fsetxattr
-	PTR	sys_getxattr
-	PTR	sys_lgetxattr
-	PTR	sys_fgetxattr
-	PTR	sys_listxattr			/* 4230 */
-	PTR	sys_llistxattr
-	PTR	sys_flistxattr
-	PTR	sys_removexattr
-	PTR	sys_lremovexattr
-	PTR	sys_fremovexattr		/* 4235 */
-	PTR	sys_tkill
-	PTR	sys_sendfile64
-	PTR	compat_sys_futex
-	PTR	compat_sys_sched_setaffinity
-	PTR	compat_sys_sched_getaffinity	/* 4240 */
-	PTR	compat_sys_io_setup
-	PTR	sys_io_destroy
-	PTR	compat_sys_io_getevents
-	PTR	compat_sys_io_submit
-	PTR	sys_io_cancel			/* 4245 */
-	PTR	sys_exit_group
-	PTR	compat_sys_lookup_dcookie
-	PTR	sys_epoll_create
-	PTR	sys_epoll_ctl
-	PTR	sys_epoll_wait			/* 4250 */
-	PTR	sys_remap_file_pages
-	PTR	sys_set_tid_address
-	PTR	sys_restart_syscall
-	PTR	sys32_fadvise64_64
-	PTR	compat_sys_statfs64		/* 4255 */
-	PTR	compat_sys_fstatfs64
-	PTR	compat_sys_timer_create
-	PTR	compat_sys_timer_settime
-	PTR	compat_sys_timer_gettime
-	PTR	sys_timer_getoverrun		/* 4260 */
-	PTR	sys_timer_delete
-	PTR	compat_sys_clock_settime
-	PTR	compat_sys_clock_gettime
-	PTR	compat_sys_clock_getres
-	PTR	compat_sys_clock_nanosleep	/* 4265 */
-	PTR	sys_tgkill
-	PTR	compat_sys_utimes
-	PTR	sys_ni_syscall			/* sys_mbind */
-	PTR	sys_ni_syscall			/* sys_get_mempolicy */
-	PTR	sys_ni_syscall			/* 4270 sys_set_mempolicy */
-	PTR	compat_sys_mq_open
-	PTR	sys_mq_unlink
-	PTR	compat_sys_mq_timedsend
-	PTR	compat_sys_mq_timedreceive
-	PTR	compat_sys_mq_notify		/* 4275 */
-	PTR	compat_sys_mq_getsetattr
-	PTR	sys_ni_syscall			/* sys_vserver */
-	PTR	compat_sys_waitid
-	PTR	sys_ni_syscall			/* available, was setaltroot */
-	PTR	sys_add_key			/* 4280 */
-	PTR	sys_request_key
-	PTR	sys_keyctl
-	PTR	sys_set_thread_area
-	PTR	sys_inotify_init
-	PTR	sys_inotify_add_watch		/* 4285 */
-	PTR	sys_inotify_rm_watch
-	PTR	sys_migrate_pages
-	PTR	compat_sys_openat
-	PTR	sys_mkdirat
-	PTR	sys_mknodat			/* 4290 */
-	PTR	sys_fchownat
-	PTR	compat_sys_futimesat
-	PTR	sys_newfstatat
-	PTR	sys_unlinkat
-	PTR	sys_renameat			/* 4295 */
-	PTR	sys_linkat
-	PTR	sys_symlinkat
-	PTR	sys_readlinkat
-	PTR	sys_fchmodat
-	PTR	sys_faccessat			/* 4300 */
-	PTR	compat_sys_pselect6
-	PTR	compat_sys_ppoll
-	PTR	sys_unshare
-	PTR	sys_splice
-	PTR	sys32_sync_file_range		/* 4305 */
-	PTR	sys_tee
-	PTR	compat_sys_vmsplice
-	PTR	compat_sys_move_pages
-	PTR	compat_sys_set_robust_list
-	PTR	compat_sys_get_robust_list	/* 4310 */
-	PTR	compat_sys_kexec_load
-	PTR	sys_getcpu
-	PTR	compat_sys_epoll_pwait
-	PTR	sys_ioprio_set
-	PTR	sys_ioprio_get			/* 4315 */
-	PTR	compat_sys_utimensat
-	PTR	compat_sys_signalfd
-	PTR	sys_ni_syscall			/* was timerfd */
-	PTR	sys_eventfd
-	PTR	sys32_fallocate			/* 4320 */
-	PTR	sys_timerfd_create
-	PTR	compat_sys_timerfd_gettime
-	PTR	compat_sys_timerfd_settime
-	PTR	compat_sys_signalfd4
-	PTR	sys_eventfd2			/* 4325 */
-	PTR	sys_epoll_create1
-	PTR	sys_dup3
-	PTR	sys_pipe2
-	PTR	sys_inotify_init1
-	PTR	compat_sys_preadv		/* 4330 */
-	PTR	compat_sys_pwritev
-	PTR	compat_sys_rt_tgsigqueueinfo
-	PTR	sys_perf_event_open
-	PTR	sys_accept4
-	PTR	compat_sys_recvmmsg		/* 4335 */
-	PTR	sys_fanotify_init
-	PTR	compat_sys_fanotify_mark
-	PTR	sys_prlimit64
-	PTR	sys_name_to_handle_at
-	PTR	compat_sys_open_by_handle_at	/* 4340 */
-	PTR	compat_sys_clock_adjtime
-	PTR	sys_syncfs
-	PTR	compat_sys_sendmmsg
-	PTR	sys_setns
-	PTR	compat_sys_process_vm_readv	/* 4345 */
-	PTR	compat_sys_process_vm_writev
-	PTR	sys_kcmp
-	PTR	sys_finit_module
-	sys sys_ni_syscall	/* sys_sched_setattr */
-	sys sys_ni_syscall	/* sys_sched_getattr */		/* 4350 */
-	sys sys_ni_syscall	/* sys_renameat2 */
-	sys	sys_seccomp
-	.size	sys32_call_table,.-sys32_call_table
+	sys	sys32_syscall		8	/* 4000 */
+	sys	sys_exit		1
+	sys	__sys_fork		0
+	sys	sys_read		3
+	sys	sys_write		3
+	sys	compat_sys_open		3	/* 4005 */
+	sys	sys_close		1
+	sys	sys_waitpid		3
+	sys	sys_creat		2
+	sys	sys_link		2
+	sys	sys_unlink		1	/* 4010 */
+	sys	compat_sys_execve	0
+	sys	sys_chdir		1
+	sys	compat_sys_time		1
+	sys	sys_mknod		3
+	sys	sys_chmod		2	/* 4015 */
+	sys	sys_lchown		3
+	sys	sys_ni_syscall		0
+	sys	sys_ni_syscall		0	/* was sys_stat */
+	sys	sys_lseek		3
+	sys	sys_getpid		0	/* 4020 */
+	sys	compat_sys_mount	5
+	sys	sys_oldumount		1
+	sys	sys_setuid		1
+	sys	sys_getuid		0
+	sys	compat_sys_stime	1	/* 4025 */
+	sys	compat_sys_ptrace	4
+	sys	sys_alarm		1
+	sys	sys_ni_syscall		0	/* was sys_fstat */
+	sys	sys_pause		0
+	sys	compat_sys_utime	2	/* 4030 */
+	sys	sys_ni_syscall		0
+	sys	sys_ni_syscall		0
+	sys	sys_access		2
+	sys	sys_nice		1
+	sys	sys_ni_syscall		0	/* 4035 */
+	sys	sys_sync		0
+	sys	sys_kill		2
+	sys	sys_rename		2
+	sys	sys_mkdir		2
+	sys	sys_rmdir		1	/* 4040 */
+	sys	sys_dup			1
+	sys	sysm_pipe		0
+	sys	compat_sys_times	1
+	sys	sys_ni_syscall		0
+	sys	sys_brk			1	/* 4045 */
+	sys	sys_setgid		1
+	sys	sys_getgid		0
+	sys	sys_ni_syscall		0	/* was signal(2) */
+	sys	sys_geteuid		0
+	sys	sys_getegid		0	/* 4050 */
+	sys	sys_acct		1
+	sys	sys_umount		2
+	sys	sys_ni_syscall		0
+	sys	compat_sys_ioctl	3
+	sys	compat_sys_fcntl	3	/* 4055 */
+	sys	sys_ni_syscall		2
+	sys	sys_setpgid		2
+	sys	sys_ni_syscall		0
+	sys	sys_olduname		1
+	sys	sys_umask		1	/* 4060 */
+	sys	sys_chroot		1
+	sys	compat_sys_ustat	2
+	sys	sys_dup2		2
+	sys	sys_getppid		0
+	sys	sys_getpgrp		0	/* 4065 */
+	sys	sys_setsid		0
+	sys	sys_32_sigaction	3
+	sys	sys_sgetmask		0
+	sys	sys_ssetmask		1
+	sys	sys_setreuid		2	/* 4070 */
+	sys	sys_setregid		2
+	sys	sys32_sigsuspend	0
+	sys	compat_sys_sigpending	1
+	sys	sys_sethostname		2
+	sys	compat_sys_setrlimit	2	/* 4075 */
+	sys	compat_sys_getrlimit	2
+	sys	compat_sys_getrusage	2
+	sys	compat_sys_gettimeofday	2
+	sys	compat_sys_settimeofday	2
+	sys	sys_getgroups		2	/* 4080 */
+	sys	sys_setgroups		2
+	sys	sys_ni_syscall		0	/* old_select */
+	sys	sys_symlink		2
+	sys	sys_ni_syscall		0	/* was sys_lstat */
+	sys	sys_readlink		3	/* 4085 */
+	sys	sys_uselib		1
+	sys	sys_swapon		2
+	sys	sys_reboot		3
+	sys	compat_sys_old_readdir	3
+	sys	sys_mips_mmap		6	/* 4090 */
+	sys	sys_munmap		2
+	sys	compat_sys_truncate	2
+	sys	compat_sys_ftruncate	2
+	sys	sys_fchmod		2
+	sys	sys_fchown		3	/* 4095 */
+	sys	sys_getpriority		2
+	sys	sys_setpriority		3
+	sys	sys_ni_syscall		0
+	sys	compat_sys_statfs	2
+	sys	compat_sys_fstatfs	2	/* 4100 */
+	sys	sys_ni_syscall		0	/* was ioperm(2) */
+	sys	compat_sys_socketcall	2
+	sys	sys_syslog		3
+	sys	compat_sys_setitimer	3
+	sys	compat_sys_getitimer	2	/* 4105 */
+	sys	compat_sys_newstat	2
+	sys	compat_sys_newlstat	2
+	sys	compat_sys_newfstat	2
+	sys	sys_uname		1
+	sys	sys_ni_syscall		0	/* 4110 was iopl(2) */
+	sys	sys_vhangup		0
+	sys	sys_ni_syscall		0	/* was sys_idle() */
+	sys	sys_ni_syscall		0	/* was sys_vm86 */
+	sys	compat_sys_wait4	4
+	sys	sys_swapoff		1	/* 4115 */
+	sys	compat_sys_sysinfo	1
+	sys	compat_sys_ipc		6
+	sys	sys_fsync		1
+	sys	sys32_sigreturn		0
+	sys	__sys_clone		6	/* 4120 */
+	sys	sys_setdomainname	2
+	sys	sys_newuname		1
+	sys	sys_ni_syscall		0	/* sys_modify_ldt */
+	sys	compat_sys_adjtimex	1
+	sys	sys_mprotect		3	/* 4125 */
+	sys	compat_sys_sigprocmask	3
+	sys	sys_ni_syscall		0	/* was create_module */
+	sys	sys_init_module		5
+	sys	sys_delete_module	1
+	sys	sys_ni_syscall		0	/* 4130 was get_kernel_syms */
+	sys	sys_quotactl		4
+	sys	sys_getpgid		1
+	sys	sys_fchdir		1
+	sys	sys_bdflush		2
+	sys	sys_sysfs		3	/* 4135 */
+	sys	sys_32_personality	1
+	sys	sys_ni_syscall		0	/* for afs_syscall */
+	sys	sys_setfsuid		1
+	sys	sys_setfsgid		1
+	sys	sys_32_llseek		5	/* 4140 */
+	sys	compat_sys_getdents	3
+	sys	compat_sys_select	5
+	sys	sys_flock		2
+	sys	sys_msync		3
+	sys	compat_sys_readv	3	/* 4145 */
+	sys	compat_sys_writev	3
+	sys	sys_cacheflush		3
+	sys	sys_cachectl		3
+	sys	sys_sysmips		4
+	sys	sys_ni_syscall		0	/* 4150 */
+	sys	sys_getsid		1
+	sys	sys_fdatasync		1
+	sys	compat_sys_sysctl	1
+	sys	sys_mlock		2
+	sys	sys_munlock		2	/* 4155 */
+	sys	sys_mlockall		1
+	sys	sys_munlockall		0
+	sys	sys_sched_setparam	2
+	sys	sys_sched_getparam	2
+	sys	sys_sched_setscheduler	3	/* 4160 */
+	sys	sys_sched_getscheduler	1
+	sys	sys_sched_yield		0
+	sys	sys_sched_get_priority_max 1
+	sys	sys_sched_get_priority_min 1
+	sys	compat_sys_sched_rr_get_interval 2	/* 4165 */
+	sys	compat_sys_nanosleep	2
+	sys	sys_mremap		5
+	sys	sys_accept		3
+	sys	sys_bind		3
+	sys	sys_connect		3	/* 4170 */
+	sys	sys_getpeername		3
+	sys	sys_getsockname		3
+	sys	sys_getsockopt		5
+	sys	sys_listen		2
+	sys	compat_sys_recv		4	/* 4175 */
+	sys	compat_sys_recvfrom	6
+	sys	compat_sys_recvmsg	3
+	sys	sys_send		4
+	sys	compat_sys_sendmsg	3
+	sys	sys_sendto		6	/* 4180 */
+	sys	compat_sys_setsockopt	5
+	sys	sys_shutdown		2
+	sys	sys_socket		3
+	sys	sys_socketpair		4
+	sys	sys_setresuid		3	/* 4185 */
+	sys	sys_getresuid		3
+	sys	sys_ni_syscall		0	/* was sys_query_module */
+	sys	sys_poll		3
+	sys	sys_ni_syscall		0	/* was nfsservctl */
+	sys	sys_setresgid		3	/* 4190 */
+	sys	sys_getresgid		3
+	sys	sys_prctl		5
+	sys	sys32_rt_sigreturn	0
+	sys	compat_sys_rt_sigaction	4
+	sys	compat_sys_rt_sigprocmask	4	/* 4195 */
+	sys	compat_sys_rt_sigpending	2
+	sys	compat_sys_rt_sigtimedwait	4
+	sys	compat_sys_rt_sigqueueinfo	3
+	sys	compat_sys_rt_sigsuspend	0
+	sys	sys_32_pread		6	/* 4200 */
+	sys	sys_32_pwrite		6
+	sys	sys_chown		3
+	sys	sys_getcwd		2
+	sys	sys_capget		2
+	sys	sys_capset		2	/* 4205 */
+	sys	compat_sys_sigaltstack	0
+	sys	compat_sys_sendfile	4
+	sys	sys_ni_syscall		0
+	sys	sys_ni_syscall		0
+	sys	sys_mips_mmap2		6	/* 4210 */
+	sys	sys_32_truncate64	4
+	sys	sys_32_ftruncate64	4
+	sys	sys_newstat             2
+	sys	sys_newlstat            2
+	sys	sys_newfstat		2	/* 4215 */
+	sys	sys_pivot_root		2
+	sys	sys_mincore		3
+	sys	sys_madvise		3
+	sys	sys_getdents64		3
+	sys	compat_sys_fcntl64	3	/* 4220 */
+	sys	sys_ni_syscall		0
+	sys	sys_gettid		0
+	sys	sys32_readahead		5
+	sys	sys_setxattr		5
+	sys	sys_lsetxattr		5	/* 4225 */
+	sys	sys_fsetxattr		5
+	sys	sys_getxattr		4
+	sys	sys_lgetxattr		4
+	sys	sys_fgetxattr		4
+	sys	sys_listxattr		3	/* 4230 */
+	sys	sys_llistxattr		3
+	sys	sys_flistxattr		3
+	sys	sys_removexattr		2
+	sys	sys_lremovexattr	2
+	sys	sys_fremovexattr	2	/* 4235 */
+	sys	sys_tkill		2
+	sys	sys_sendfile64		5
+	sys	compat_sys_futex	6
+#ifdef CONFIG_MIPS_MT_FPAFF
+	/*
+	 * For FPU affinity scheduling on MIPS MT processors, we need to
+	 * intercept sys_sched_xxxaffinity() calls until we get a proper hook
+	 * in kernel/sched.c.  Considered only temporary we only support these
+	 * hooks for the 32-bit kernel - there is no MIPS64 MT processor atm.
+	 */
+	// FIXME These entry points do not exist
+	sys	compat_mipsmt_sys_sched_setaffinity	3
+	sys	compat_mipsmt_sys_sched_getaffinity	3
+#else
+	sys	compat_sys_sched_setaffinity	3
+	sys	compat_sys_sched_getaffinity	3	/* 4240 */
+#endif /* CONFIG_MIPS_MT_FPAFF */
+	sys	compat_sys_io_setup		2
+	sys	sys_io_destroy		1
+	sys	compat_sys_io_getevents	5
+	sys	compat_sys_io_submit		3
+	sys	sys_io_cancel		3	/* 4245 */
+	sys	sys_exit_group		1
+	sys	compat_sys_lookup_dcookie	4
+	sys	sys_epoll_create	1
+	sys	sys_epoll_ctl		4
+	sys	sys_epoll_wait		4	/* 4250 */
+	sys	sys_remap_file_pages	5
+	sys	sys_set_tid_address	1
+	sys	sys_restart_syscall	0
+	sys	sys32_fadvise64_64	7
+	sys	compat_sys_statfs64	3	/* 4255 */
+	sys	compat_sys_fstatfs64		2
+	sys	compat_sys_timer_create	3
+	sys	compat_sys_timer_settime        4
+	sys	compat_sys_timer_gettime        2
+	sys	sys_timer_getoverrun	1	/* 4260 */
+	sys	sys_timer_delete	1
+	sys	compat_sys_clock_settime	2
+	sys	compat_sys_clock_gettime	2
+	sys	compat_sys_clock_getres	2
+	sys	compat_sys_clock_nanosleep	4	/* 4265 */
+	sys	sys_tgkill		3
+	sys	compat_sys_utimes		2
+	sys	sys_ni_syscall		0	/* FIXME: scall32-o32 implements
+ this system call with the wron number of args?! */
+	sys	sys_ni_syscall		0	/* sys_get_mempolicy */
+	sys	sys_ni_syscall		0	/* 4270 sys_set_mempolicy */
+	sys	compat_sys_mq_open		4
+	sys	sys_mq_unlink		1
+	sys	compat_sys_mq_timedsend	5
+	sys	compat_sys_mq_timedreceive	5
+	sys	compat_sys_mq_notify		2	/* 4275 */
+	sys	compat_sys_mq_getsetattr	3
+	sys	sys_ni_syscall		0	/* sys_vserver */
+	sys	compat_sys_waitid		5
+	sys	sys_ni_syscall		0	/* available, was setaltroot */
+	sys	sys_add_key		5	/* 4280 */
+	sys	sys_request_key		4
+	sys	sys_keyctl		5
+	sys	sys_set_thread_area	1
+	sys	sys_inotify_init	0
+	sys	sys_inotify_add_watch	3	/* 4285 */
+	sys	sys_inotify_rm_watch	2
+	sys	sys_migrate_pages	4
+	sys	compat_sys_openat		4
+	sys	sys_mkdirat		3
+	sys	sys_mknodat		4	/* 4290 */
+	sys	sys_fchownat		5
+	sys	compat_sys_futimesat		3
+	sys	sys_newfstatat		4
+	sys	sys_unlinkat		3
+	sys	sys_renameat		4	/* 4295 */
+	sys	sys_linkat		5
+	sys	sys_symlinkat		3
+	sys	sys_readlinkat		4
+	sys	sys_fchmodat		3
+	sys	sys_faccessat		3	/* 4300 */
+	sys	compat_sys_pselect6		6
+	sys	compat_sys_ppoll		5
+	sys	sys_unshare		1
+	sys	sys_splice		6
+	sys	sys32_sync_file_range	7	/* 4305 */
+	sys	sys_tee			4
+	sys	compat_sys_vmsplice		4
+	sys	compat_sys_move_pages		6
+	sys	compat_sys_set_robust_list	2
+	sys	compat_sys_get_robust_list	3	/* 4310 */
+	sys	compat_sys_kexec_load		4
+	sys	sys_getcpu		3
+	sys	compat_sys_epoll_pwait		6
+	sys	sys_ioprio_set		3
+	sys	sys_ioprio_get		2	/* 4315 */
+	sys	compat_sys_utimensat		4
+	sys	compat_sys_signalfd		3
+	sys	sys_ni_syscall		0	/* was timerfd */
+	sys	sys_eventfd		1
+	sys	sys32_fallocate		6	/* 4320 */
+	sys	sys_timerfd_create	2
+	sys	compat_sys_timerfd_gettime	2
+	sys	compat_sys_timerfd_settime	4
+	sys	compat_sys_signalfd4		4
+	sys	sys_eventfd2		2	/* 4325 */
+	sys	sys_epoll_create1	1
+	sys	sys_dup3		3
+	sys	sys_pipe2		2
+	sys	sys_inotify_init1	1
+	sys	compat_sys_preadv		6	/* 4330 */
+	sys	compat_sys_pwritev		6
+	sys	compat_sys_rt_tgsigqueueinfo	4
+	sys	sys_perf_event_open	5
+	sys	sys_accept4		4
+	sys	compat_sys_recvmmsg		5	/* 4335 */
+	sys	sys_fanotify_init	2
+	sys	compat_sys_fanotify_mark	6
+	sys	sys_prlimit64		4
+	sys	sys_name_to_handle_at	5
+	sys	compat_sys_open_by_handle_at	3	/* 4340 */
+	sys	compat_sys_clock_adjtime	2
+	sys	sys_syncfs		1
+	sys	compat_sys_sendmmsg		4
+	sys	sys_setns		2
+	sys	compat_sys_process_vm_readv	6	/* 4345 */
+	sys	compat_sys_process_vm_writev	6
+	sys	sys_kcmp		5
+	sys	sys_finit_module	3
+	/* Backporting seccomp, skip a few ... */
+	sys	sys_ni_syscall		0	/* sys_sched_setattr */
+	sys	sys_ni_syscall		0	/* sys_sched_getattr */		/* 4350 */
+	sys	sys_ni_syscall		0	/* sys_renameat2 */
+	sys	sys_seccomp 3
+	.size	sys_call_table,.-sys_call_table
