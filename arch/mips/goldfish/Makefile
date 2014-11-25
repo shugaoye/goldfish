@@ -10,7 +10,9 @@ obj-$(CONFIG_GOLDFISH)	+= goldfish-time.o
 obj-$(CONFIG_GOLDFISH)	+= switch.o
 obj-$(CONFIG_GOLDFISH)	+= pm.o
 
-obj-$(CONFIG_MIPS_RANCHU)	+= ranchu.dtb.o
+ifneq ($(CONFIG_MIPS_APPENDED_DTB), y)
+obj-$(CONFIG_MIPS_RANCHU)        += ranchu.dtb.o
 
 $(obj)/%.dtb: $(obj)/%.dts
        $(call if_changed,dtc)
+endif

@@ -58,10 +58,17 @@ const char *get_system_type(void)
 void __init plat_mem_setup(void)
 {
 	/*
-	 * Load the builtin devicetree. This causes the chosen node to be
+	 * Load the builtin or appended devicetree.
+	 * This causes the chosen node to be
 	 * parsed resulting in our memory appearing
 	 */
+#ifdef CONFIG_MIPS_APPENDED_DTB
+	pr_info("Try setup using Appended DTB\n");
+	__dt_setup_arch(&__appended_dtb);
+#else
+	pr_info("Try setup using Built-in DTB\n");
 	__dt_setup_arch(&__dtb_start);
+#endif
 }
 
 void __init device_tree_init(void)

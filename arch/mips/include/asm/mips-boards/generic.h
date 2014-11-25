@@ -69,6 +69,9 @@ extern int mips_revision_sconid;
 
 #ifdef CONFIG_OF
 extern struct boot_param_header __dtb_start;
+#ifdef CONFIG_MIPS_APPENDED_DTB
+extern struct boot_param_header __appended_dtb;
+#endif
 #endif
 
 #ifdef CONFIG_PCI

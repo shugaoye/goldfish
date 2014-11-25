@@ -101,7 +101,11 @@ void __init early_init_devtree(void *params)
 void __init __dt_setup_arch(struct boot_param_header *bph)
 {
 	if (be32_to_cpu(bph->magic) != OF_DT_HEADER) {
+#ifdef CONFIG_MIPS_APPENDED_DTB
+		pr_err("DTB has bad magic, ignoring appended OF DTB\n");
+#else
 		pr_err("DTB has bad magic, ignoring builtin OF DTB\n");
+#endif
 
 		return;
 	}

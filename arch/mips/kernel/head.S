@@ -179,6 +179,23 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	mtc0	t0, CP0_STATUS
 #endif /* CONFIG_MIPS_MT_SMTC */
 
+#ifdef CONFIG_MIPS_APPENDED_DTB
+       PTR_LA          t0, __appended_dtb
+       PTR_LI          t3, 0
+
+#ifdef CONFIG_CPU_BIG_ENDIAN
+       PTR_LI          t1, 0xd00dfeed
+#else
+       PTR_LI          t1, 0xedfe0dd0
+#endif
+       LONG_L          t2, (t0)
+       bne             t1, t2, not_found
+
+       PTR_LA          t3, __appended_dtb
+
+not_found:
+#endif
+
 	PTR_LA		t0, __bss_start		# clear .bss
 	LONG_S		zero, (t0)
 	PTR_LA		t1, __bss_stop - LONGSIZE
@@ -191,6 +208,10 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	LONG_S		a1, fw_arg1
 	LONG_S		a2, fw_arg2
 	LONG_S		a3, fw_arg3
+
+#ifdef CONFIG_MIPS_APPENDED_DTB
+       LONG_S          t3, initial_boot_params
+#endif
 
 	MTC0		zero, CP0_CONTEXT	# clear context register
 	PTR_LA		$28, init_thread_union

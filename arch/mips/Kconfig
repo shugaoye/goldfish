@@ -2499,6 +2499,20 @@ config USE_OF
 	select OF_EARLY_FLATTREE
 	select IRQ_DOMAIN
 
+config MIPS_APPENDED_DTB
+       bool "Use appended device tree blob to vmlinux.bin (EXPERIMENTAL)"
+       depends on OF && MIPS_RANCHU
+       help
+         With this option, the boot code will look for a device tree binary
+         DTB) appended to raw vmlinux.bin (without decompressor).
+         (e.g. cat vmlinux.bin <filename>.dtb > vmlinux_w_dtb).
+
+         Beware that there is very little in terms of protection against
+         this option being confused by leftover garbage in memory that might
+         look like a DTB header after a reboot if no actual DTB is appended
+         to vmlinux.bin. Do not leave this option active in a production kernel
+         if you don't intend to always append a DTB.
+
 endmenu
 
 config LOCKDEP_SUPPORT
