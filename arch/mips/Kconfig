@@ -289,8 +289,8 @@ config MACH_LOONGSON1
 	  the ICT (Institute of Computing Technology) and the Chinese Academy
 	  of Sciences.
 
-config MIPS_GOLDFISH
-	bool "Goldfish (Virtual Platform)"
+config MIPS_RANCHU
+	bool "Ranchu (Virtual Platform)"
 	select BOOT_ELF32
 	select BOOT_RAW
 	select CEVT_R4K
@@ -1857,6 +1857,23 @@ config KVM_HOST_FREQ
 	  RTC emulation when determining guest CPU Frequency.  Instead, the guest
 	  processor frequency is automatically derived from the host frequency.
 
+config 64BIT_PHYS_ADDR
+	bool "Kernel supports 64 bit physical addresses" if EXPERIMENTAL
+	depends on 64BIT
+	help
+	  Defines 64 bit physical addresses in kernel.
+	  Increases page table sizes.
+
+	  It is an alternative for HIGHMEM usage of huge physical memory.
+	  Requires 64bit capable CPU and 64 bit kernel code model.
+
+	  Note: without this option kernel can support up to 4GB physical
+	  memory for 4KB pages and up to 64GB for 64KB pages.
+
+config ARCH_PHYS_ADDR_T_64BIT
+	def_bool 64BIT_PHYS_ADDR
+
+
 choice
 	prompt "Kernel page size"
 	default PAGE_SIZE_4KB
@@ -2144,12 +2161,6 @@ config SB1_PASS_2_1_WORKAROUNDS
 	depends on CPU_SB1 && CPU_SB1_PASS_2
 	default y
 
-
-config 64BIT_PHYS_ADDR
-	bool
-
-config ARCH_PHYS_ADDR_T_64BIT
-       def_bool 64BIT_PHYS_ADDR
 
 config CPU_HAS_SMARTMIPS
 	depends on SYS_SUPPORTS_SMARTMIPS

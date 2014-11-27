@@ -35,9 +35,19 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	 */
 	if (n == 0) {
 		seq_printf(m, "system type\t\t: %s\n", get_system_type());
+#ifndef CONFIG_GOLDFISH
 		if (mips_get_machine_name())
 			seq_printf(m, "machine\t\t\t: %s\n",
 				   mips_get_machine_name());
+#else
+       /*
+        * This is needed by the Android init process to run
+        * target specific startup code
+        */
+		seq_printf(m, "Hardware\t\t: %s\n", mips_get_machine_name());
+		seq_printf(m, "Revison\t\t\t: %d\n", 1);
+#endif
+
 	}
 
 	seq_printf(m, "processor\t\t: %ld\n", n);

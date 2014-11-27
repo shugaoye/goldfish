@@ -1,0 +1,8 @@
+#
+# Goldfish
+#
+platform-$(CONFIG_GOLDFISH)   := goldfish/
+cflags-$(CONFIG_GOLDFISH)  += -Iarch/mips/include/asm/mach-goldfish -Iarch/mips/goldfish/include
+load-$(CONFIG_GOLDFISH)    += 0xffffffff80010000
+all-$(CONFIG_GOLDFISH)     := $(COMPRESSION_FNAME).bin
+
