@@ -973,10 +973,16 @@ asmlinkage void do_ri(struct pt_regs *regs)
 			switch (status) {
 			case SIGEMT:
 			case 0:
+				if (test_thread_flag(TIF_32BIT_ADDR) &&
+				    !test_thread_flag(TIF_32BIT_REGS))
+					set_thread_flag(TIF_32BIT_REGS);
 				return;
 			case SIGILL:
 				break;
 			default:
+				if (test_thread_flag(TIF_32BIT_ADDR) &&
+				    !test_thread_flag(TIF_32BIT_REGS))
+					set_thread_flag(TIF_32BIT_REGS);
 				process_fpemu_return(status, (void __user *)current->thread.cp0_baduaddr);
 				return;
 			}

@@ -232,6 +232,24 @@ typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
  * Ensure we don't load the incompatible architecture lib via uselib() -
  * - verify FPU model.
  */
+#ifdef CONFIG_CPU_MIPSR6
+#define elf_lib_check_arch(hdr)                                         \
+({									\
+	int __res = 1;							\
+	struct elfhdr *__h = (hdr);					\
+									\
+	if (test_thread_flag(TIF_32BIT_REGS)) {                         \
+		if ((__h->e_flags & EF_MIPS_ABI2) != 0)                 \
+			__res = 0;                                      \
+		if (((__h->e_flags & EF_MIPS_ABI) != 0) &&              \
+		    ((__h->e_flags & EF_MIPS_ABI) != EF_MIPS_ABI_O32))  \
+			__res = 0;                                      \
+		if (__h->e_flags & EF_MIPS_32BITMODE_FP64)             \
+			__res = 0;                                  \
+	}                                                               \
+	__res;								\
+})
+#else
 #define elf_lib_check_arch(hdr)                                         \
 ({									\
 	int __res = 1;							\
@@ -253,6 +271,7 @@ typedef elf_fpreg_t elf_fpregset_t[ELF_NFPREG];
 	}                                                               \
 	__res;								\
 })
+#endif
 
 /*
  * These are used to set parameters in the core dumps.
@@ -274,6 +293,17 @@ extern struct mips_abi mips_abi_n32;
 
 #ifdef CONFIG_32BIT
 
+#ifdef CONFIG_CPU_MIPSR6
+#define SET_PERSONALITY(ex)						\
+do {									\
+	clear_thread_flag(TIF_32BIT_REGS);                              \
+									\
+	if (personality(current->personality) != PER_LINUX)		\
+		set_personality(PER_LINUX);				\
+									\
+	current->thread.abi = &mips_abi;				\
+} while (0)
+#else
 #define SET_PERSONALITY(ex)						\
 do {									\
 	if ((ex).e_flags & EF_MIPS_32BITMODE_FP64)                      \
@@ -286,6 +316,7 @@ do {									\
 									\
 	current->thread.abi = &mips_abi;				\
 } while (0)
+#endif
 
 #endif /* CONFIG_32BIT */
 
@@ -304,6 +335,14 @@ do {									\
 #endif
 
 #ifdef CONFIG_MIPS32_O32
+#ifdef CONFIG_CPU_MIPSR6
+#define __SET_PERSONALITY32_O32(ex)                                     \
+	do {								\
+		clear_thread_flag(TIF_32BIT_REGS);                      \
+		set_thread_flag(TIF_32BIT_ADDR);			\
+		current->thread.abi = &mips_abi_32;			\
+	} while (0)
+#else
 #define __SET_PERSONALITY32_O32(ex)                                     \
 	do {								\
 		if ((ex).e_flags & EF_MIPS_32BITMODE_FP64)              \
@@ -314,6 +353,7 @@ do {									\
 		set_thread_flag(TIF_32BIT_ADDR);			\
 		current->thread.abi = &mips_abi_32;			\
 	} while (0)
+#endif
 #else
 #define __SET_PERSONALITY32_O32(ex)                                     \
 	do { } while (0)
