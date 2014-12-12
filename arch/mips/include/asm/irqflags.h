@@ -17,7 +17,7 @@
 #include <linux/stringify.h>
 #include <asm/hazards.h>
 
-#if defined(CONFIG_CPU_MIPSR2) && !defined(CONFIG_MIPS_MT_SMTC)
+#if (defined(CONFIG_CPU_MIPSR6) || defined(CONFIG_CPU_MIPSR2)) && !defined(CONFIG_MIPS_MT_SMTC)
 
 static inline void arch_local_irq_disable(void)
 {
@@ -118,7 +118,7 @@ void arch_local_irq_disable(void);
 unsigned long arch_local_irq_save(void);
 void arch_local_irq_restore(unsigned long flags);
 void __arch_local_irq_restore(unsigned long flags);
-#endif /* if defined(CONFIG_CPU_MIPSR2) && !defined(CONFIG_MIPS_MT_SMTC) */
+#endif /* if (defined(CONFIG_CPU_MIPSR6) || defined(CONFIG_CPU_MIPSR2)) && !defined(CONFIG_MIPS_MT_SMTC) */
 
 
 extern void smtc_ipi_replay(void);
@@ -141,7 +141,7 @@ static inline void arch_local_irq_enable(void)
 	"	ori	$1, 0x400					\n"
 	"	xori	$1, 0x400					\n"
 	"	mtc0	$1, $2, 1					\n"
-#elif defined(CONFIG_CPU_MIPSR2)
+#elif defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6)
 	"	ei							\n"
 #else
 	"	mfc0	$1,$12						\n"

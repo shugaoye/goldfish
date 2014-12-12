@@ -145,6 +145,12 @@ SECTIONS
 
 	_end = . ;
 
+#ifdef CONFIG_MIPS_APPENDED_DTB
+       __appended_dtb = .;
+       /* leave space for appended DTB */
+       . = . + 0x100000;
+#endif
+
 	/* These mark the ABI of the kernel for debuggers.  */
 	.mdebug.abi32 : {
 		KEEP(*(.mdebug.abi32))

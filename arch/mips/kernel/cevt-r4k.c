@@ -16,6 +16,7 @@
 #include <asm/time.h>
 #include <asm/cevt-r4k.h>
 #include <asm/gic.h>
+#include <asm/irq_cpu.h>
 
 /*
  * The SMTC Kernel for the 34K, 1004K, et. al. replaces several
@@ -50,7 +51,7 @@ int cp0_timer_irq_installed;
 #ifndef CONFIG_MIPS_MT_SMTC
 irqreturn_t c0_compare_interrupt(int irq, void *dev_id)
 {
-	const int r2 = cpu_has_mips_r2;
+	const int r2 = cpu_has_mips_r2 | cpu_has_mips_r6;
 	struct clock_event_device *cd;
 	int cpu = smp_processor_id();
 
@@ -210,9 +211,6 @@ int __cpuinit r4k_clockevent_init(void)
 	cd->set_mode		= mips_set_clock_mode;
 	cd->event_handler	= mips_event_handler;
 
-#ifdef CONFIG_CEVT_GIC
-	if (!gic_present)
-#endif
 	clockevents_register_device(cd);
 
 	if (cp0_timer_irq_installed)
@@ -221,6 +219,12 @@ int __cpuinit r4k_clockevent_init(void)
 	cp0_timer_irq_installed = 1;
 
 	setup_irq(irq, &c0_compare_irqaction);
+
+#ifdef CONFIG_IRQ_CPU
+	mips_smp_c0_status_mask |= (0x100 << cp0_compare_irq);
+	if (cp0_perfcount_irq >= 0)
+		mips_smp_c0_status_mask |= (0x100 << cp0_perfcount_irq);
+#endif
 
 	return 0;
 }

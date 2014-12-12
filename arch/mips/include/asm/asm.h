@@ -143,67 +143,48 @@ symbol		=	value
  */
 #ifdef CONFIG_CPU_HAS_PREFETCH
 
-#define PREF(hint,addr)					\
+#ifdef CONFIG_CPU_MIPSR6
+
+#define PREF(hint,addr)                                 \
+		.set	push;				\
+		.set    mips64r6;                       \
+		pref	hint, addr;			\
+		.set	pop
+
+
+#define PREFX(hint, addr)
+
+#else /* !CONFIG_CPU_MIPSR6 */
+
+#define PREF(hint,addr)                                 \
 		.set	push;				\
 		.set	mips4;				\
 		pref	hint, addr;			\
 		.set	pop
 
-#define PREFX(hint,addr)				\
+#ifdef CONFIG_EVA
+#define PREFE(hint,addr)                                \
+		.set	push;				\
+		.set	mips4;				\
+		.set    eva;                            \
+		prefe   hint, addr;                     \
+		.set	pop
+#endif
+
+#define PREFX(hint,addr)                                \
 		.set	push;				\
 		.set	mips4;				\
 		prefx	hint, addr;			\
 		.set	pop
+#endif /* CONFIG_CPU_MIPSR6 */
 
 #else /* !CONFIG_CPU_HAS_PREFETCH */
 
 #define PREF(hint, addr)
+#define PREFE(hint, addr)
 #define PREFX(hint, addr)
 
 #endif /* !CONFIG_CPU_HAS_PREFETCH */
-
-/*
- * MIPS ISA IV/V movn/movz instructions and equivalents for older CPUs.
- */
-#if (_MIPS_ISA == _MIPS_ISA_MIPS1)
-#define MOVN(rd, rs, rt)				\
-		.set	push;				\
-		.set	reorder;			\
-		beqz	rt, 9f;				\
-		move	rd, rs;				\
-		.set	pop;				\
-9:
-#define MOVZ(rd, rs, rt)				\
-		.set	push;				\
-		.set	reorder;			\
-		bnez	rt, 9f;				\
-		move	rd, rs;				\
-		.set	pop;				\
-9:
-#endif /* _MIPS_ISA == _MIPS_ISA_MIPS1 */
-#if (_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3)
-#define MOVN(rd, rs, rt)				\
-		.set	push;				\
-		.set	noreorder;			\
-		bnezl	rt, 9f;				\
-		 move	rd, rs;				\
-		.set	pop;				\
-9:
-#define MOVZ(rd, rs, rt)				\
-		.set	push;				\
-		.set	noreorder;			\
-		beqzl	rt, 9f;				\
-		 move	rd, rs;				\
-		.set	pop;				\
-9:
-#endif /* (_MIPS_ISA == _MIPS_ISA_MIPS2) || (_MIPS_ISA == _MIPS_ISA_MIPS3) */
-#if (_MIPS_ISA == _MIPS_ISA_MIPS4 ) || (_MIPS_ISA == _MIPS_ISA_MIPS5) || \
-    (_MIPS_ISA == _MIPS_ISA_MIPS32) || (_MIPS_ISA == _MIPS_ISA_MIPS64)
-#define MOVN(rd, rs, rt)				\
-		movn	rd, rs, rt
-#define MOVZ(rd, rs, rt)				\
-		movz	rd, rs, rt
-#endif /* MIPS IV, MIPS V, MIPS32 or MIPS64 */
 
 /*
  * Stack alignment
@@ -253,8 +234,10 @@ symbol		=	value
 #if (_MIPS_SZINT == 32)
 #define INT_ADD		add
 #define INT_ADDU	addu
-#define INT_ADDI	addi
-#define INT_ADDIU	addiu
+#ifndef CONFIG_CPU_MIPSR6
+#define INT_ADDI        addi
+#endif
+#define INT_ADDIU       addiu
 #define INT_SUB		sub
 #define INT_SUBU	subu
 #define INT_L		lw
@@ -270,7 +253,9 @@ symbol		=	value
 #if (_MIPS_SZINT == 64)
 #define INT_ADD		dadd
 #define INT_ADDU	daddu
-#define INT_ADDI	daddi
+#ifndef CONFIG_CPU_MIPSR6
+#define INT_ADDI        daddi
+#endif
 #define INT_ADDIU	daddiu
 #define INT_SUB		dsub
 #define INT_SUBU	dsubu
@@ -290,7 +275,9 @@ symbol		=	value
 #if (_MIPS_SZLONG == 32)
 #define LONG_ADD	add
 #define LONG_ADDU	addu
+#ifndef CONFIG_CPU_MIPSR6
 #define LONG_ADDI	addi
+#endif
 #define LONG_ADDIU	addiu
 #define LONG_SUB	sub
 #define LONG_SUBU	subu
@@ -313,7 +300,9 @@ symbol		=	value
 #if (_MIPS_SZLONG == 64)
 #define LONG_ADD	dadd
 #define LONG_ADDU	daddu
+#ifndef CONFIG_CPU_MIPSR6
 #define LONG_ADDI	daddi
+#endif
 #define LONG_ADDIU	daddiu
 #define LONG_SUB	dsub
 #define LONG_SUBU	dsubu
@@ -339,7 +328,9 @@ symbol		=	value
 #if (_MIPS_SZPTR == 32)
 #define PTR_ADD		add
 #define PTR_ADDU	addu
+#ifndef CONFIG_CPU_MIPSR6
 #define PTR_ADDI	addi
+#endif
 #define PTR_ADDIU	addiu
 #define PTR_SUB		sub
 #define PTR_SUBU	subu
@@ -364,7 +355,9 @@ symbol		=	value
 #if (_MIPS_SZPTR == 64)
 #define PTR_ADD		dadd
 #define PTR_ADDU	daddu
+#ifndef CONFIG_CPU_MIPSR6
 #define PTR_ADDI	daddi
+#endif
 #define PTR_ADDIU	daddiu
 #define PTR_SUB		dsub
 #define PTR_SUBU	dsubu

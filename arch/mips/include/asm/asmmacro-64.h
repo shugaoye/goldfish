@@ -14,7 +14,6 @@
 #include <asm/mipsregs.h>
 
 	.macro	fpu_save_16even thread tmp=t0
-	cfc1	\tmp, fcr31
 	sdc1	$f0,  THREAD_FPR0(\thread)
 	sdc1	$f2,  THREAD_FPR2(\thread)
 	sdc1	$f4,  THREAD_FPR4(\thread)
@@ -31,7 +30,6 @@
 	sdc1	$f26, THREAD_FPR26(\thread)
 	sdc1	$f28, THREAD_FPR28(\thread)
 	sdc1	$f30, THREAD_FPR30(\thread)
-	sw	\tmp, THREAD_FCR31(\thread)
 	.endm
 
 	.macro	fpu_save_16odd thread
@@ -54,11 +52,23 @@
 	.endm
 
 	.macro	fpu_save_double thread status tmp
-	sll	\tmp, \status, 5
+	sll     \tmp, \status, 31 - _ST0_FR
 	bgez	\tmp, 2f
 	fpu_save_16odd \thread
 2:
 	fpu_save_16even \thread \tmp
+#ifdef CONFIG_CPU_MIPSR6
+	lw      \status, THREAD_FCR31(\thread)
+	lui     \tmp, (FPU_CSR_COND0|FPU_CSR_COND1|FPU_CSR_COND2|FPU_CSR_COND3| \
+		    FPU_CSR_COND4|FPU_CSR_COND5|FPU_CSR_COND6|FPU_CSR_COND7)>>16
+	and     \tmp, \status, \tmp
+	cfc1    \status, fcr31
+	or      \tmp, \status, \tmp
+	sw	\tmp, THREAD_FCR31(\thread)
+#else
+	cfc1    \tmp, fcr31
+	sw	\tmp, THREAD_FCR31(\thread)
+#endif
 	.endm
 
 	.macro	fpu_restore_16even thread tmp=t0
@@ -102,7 +112,7 @@
 	.endm
 
 	.macro	fpu_restore_double thread status tmp
-	sll	\tmp, \status, 5
+	sll     \tmp, \status, 31 - _ST0_FR
 	bgez	\tmp, 1f				# 16 register mode?
 
 	fpu_restore_16odd \thread

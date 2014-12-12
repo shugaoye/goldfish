@@ -15,6 +15,7 @@
 #include <asm/cpu-features.h>
 #include <asm/watch.h>
 #include <asm/dsp.h>
+#include <asm/mmu_context.h>
 
 struct task_struct;
 
@@ -58,11 +59,18 @@ do {									\
 #define __mips_mt_fpaff_switch_to(prev) do { (void) (prev); } while (0)
 #endif
 
-#define __clear_software_ll_bit()					\
+#ifdef CONFIG_CPU_MIPSR6
+#define __clear_ll_bit()                                                \
+do {									\
+	write_c0_lladdr(0);                                             \
+} while (0)
+#else
+#define __clear_ll_bit()                                                \
 do {									\
 	if (!__builtin_constant_p(cpu_has_llsc) || !cpu_has_llsc)	\
 		ll_bit = 0;						\
 } while (0)
+#endif
 
 #define switch_to(prev, next, last)					\
 do {									\
@@ -70,10 +78,22 @@ do {									\
 	__mips_mt_fpaff_switch_to(prev);				\
 	if (cpu_has_dsp)						\
 		__save_dsp(prev);					\
-	__clear_software_ll_bit();					\
+	__clear_ll_bit();                                               \
 	__usedfpu = test_and_clear_tsk_thread_flag(prev, TIF_USEDFPU);	\
 	(last) = resume(prev, next, task_thread_info(next), __usedfpu); \
 } while (0)
+
+static inline void flush_vdso_page(void)
+{
+	int cpu = raw_smp_processor_id();
+
+	if (current->mm && cpu_context(cpu, current->mm) &&
+	    (current->mm->context.vdso_page[cpu] != current_thread_info()->vdso_page) &&
+	    (current->mm->context.vdso_asid[cpu] == cpu_asid(cpu, current->mm))) {
+		local_flush_tlb_page(current->mm->mmap, (unsigned long)current->mm->context.vdso);
+		current->mm->context.vdso_asid[cpu] = 0;
+	}
+}
 
 #define finish_arch_switch(prev)					\
 do {									\
@@ -81,6 +101,7 @@ do {									\
 		__restore_dsp(current);					\
 	if (cpu_has_userlocal)						\
 		write_c0_userlocal(current_thread_info()->tp_value);	\
+	flush_vdso_page();                                              \
 	__restore_watch();						\
 } while (0)
 

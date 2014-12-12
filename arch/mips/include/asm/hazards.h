@@ -21,7 +21,7 @@
 /*
  * TLB hazards
  */
-#if defined(CONFIG_CPU_MIPSR2) && !defined(CONFIG_CPU_CAVIUM_OCTEON)
+#if defined(CONFIG_CPU_MIPSR6) || (defined(CONFIG_CPU_MIPSR2) && !defined(CONFIG_CPU_CAVIUM_OCTEON))
 
 /*
  * MIPSR2 defines ehb for hazard avoidance
@@ -53,6 +53,21 @@
  * The alterantive is switching the assembler to 64-bit code which happens
  * to work right even for 32-bit code ...
  */
+#ifdef CONFIG_CPU_MIPSR6
+#define instruction_hazard()						\
+do {									\
+	unsigned long tmp;						\
+									\
+	__asm__ __volatile__(						\
+	"       .set    push                                    \n"     \
+	"       .set    mips64r6                                \n"     \
+	"	dla	%0, 1f					\n"	\
+	"	jr.hb	%0					\n"	\
+	"       .set    pop                                     \n"     \
+	"1:							\n"	\
+	: "=r" (tmp));							\
+} while (0)
+#else /* !CONFIG_CPU_MIPSR6 */
 #define instruction_hazard()						\
 do {									\
 	unsigned long tmp;						\
@@ -65,6 +80,7 @@ do {									\
 	"1:							\n"	\
 	: "=r" (tmp));							\
 } while (0)
+#endif
 
 #elif (defined(CONFIG_CPU_MIPSR1) && !defined(CONFIG_MIPS_ALCHEMY)) || \
 	defined(CONFIG_CPU_BMIPS)
@@ -132,7 +148,7 @@ do {									\
 
 #define instruction_hazard()						\
 do {									\
-	if (cpu_has_mips_r2)						\
+	if (cpu_has_mips_r2 || cpu_has_mips_r6)                         \
 		__instruction_hazard();					\
 } while (0)
 
@@ -240,7 +256,7 @@ do {									\
 
 #define __disable_fpu_hazard
 
-#elif defined(CONFIG_CPU_MIPSR2)
+#elif defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6)
 
 #define __enable_fpu_hazard						\
 	___ehb

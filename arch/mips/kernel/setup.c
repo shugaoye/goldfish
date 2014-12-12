@@ -167,6 +167,9 @@ static void __init print_memory_map(void)
 		case BOOT_MEM_RESERVED:
 			printk(KERN_CONT "(reserved)\n");
 			break;
+		case BOOT_MEM_INUSE:
+			printk(KERN_CONT "(in-use, reserved)\n");
+			break;
 		default:
 			printk(KERN_CONT "type %lu\n", boot_mem_map.map[i].type);
 			break;
@@ -292,6 +295,148 @@ static void __init bootmem_init(void)
 
 #else  /* !CONFIG_SGI_IP27 */
 
+static int maar_last = -2;
+static int nomaar_flag;
+static unsigned long maar_regs[MIPS_MAAR_MAX * 2];
+
+static int __init early_parse_nomaar(char *p)
+{
+	nomaar_flag = 1;
+	return(0);
+}
+early_param("nomaar", early_parse_nomaar);
+
+static void __init maar_reset(void)
+{
+	int maar = 0;
+
+	do {
+		write_c0_maarindex(maar);
+		back_to_back_c0_hazard();
+		if (read_c0_maarindex() != maar)
+			return;
+		write_c0_maar(0);
+		back_to_back_c0_hazard();
+	} while (++maar < MIPS_MAAR_MAX);
+}
+
+void __init maar_setup(void)
+{
+	int maar = 0;
+	phys_t low;
+	phys_t upper;
+
+	if (nomaar_flag || !cpu_has_maar)
+		return;
+
+	pr_info("MAAR setup:\n");
+	maar_reset();
+
+	for (maar=0; maar<(maar_last+2); maar++) {
+		write_c0_maarindex(maar);
+		back_to_back_c0_hazard();
+		if (read_c0_maarindex() != maar) {
+			pr_err("CPU has only %d MAARs, resetting...\n",maar - 1);
+			maar_reset();
+			return;
+		}
+		write_c0_maar(maar_regs[maar]);
+#if defined(CONFIG_CPU_MIPS32) && defined(CONFIG_64BIT_PHYS_ADDR)
+		write_c0_hi_maar(maar_regs[maar + MIPS_MAAR_MAX]);
+#endif
+		back_to_back_c0_hazard();
+		if (maar & 1) {
+			low = (((phys_t)maar_regs[maar]) << 4) & ~0xffff;
+			upper = (((phys_t)maar_regs[maar - 1]) << 4) & ~0xffff;
+#if defined(CONFIG_CPU_MIPS32) && defined(CONFIG_64BIT_PHYS_ADDR)
+			low += (((phys_t)maar_regs[maar + MIPS_MAAR_MAX]) << 36) & ~MIPS_MAAR_HI_V;
+			upper += (((phys_t)maar_regs[maar - 1 + MIPS_MAAR_MAX]) << 36) & ~MIPS_MAAR_HI_V;
+#endif
+			upper = (upper & ~0xffff) + 0xffff;
+			pr_info("  [%0#10lx-%0#10lx] %s\n", low, upper,
+				(maar_regs[maar -1] & MIPS_MAAR_S)?"speculative":"");
+		}
+	}
+}
+
+static void __init maar_update(phys_t begin, phys_t end, int speculative)
+{
+	phys_t start;
+
+	/* rounding, let's be conservative if speculative */
+	if (speculative) {
+		if (begin & 0xffff)
+			start = (begin + 0x10000) & ~0xffff;
+		else
+			start = begin;
+		end = (end - 0x10000) & ~0xffff;
+	} else {
+		start = begin & ~0xffff;
+		end = (end - 1) & ~0xffff;
+	}
+	if (speculative && (end == start))
+		return;
+
+	maar_regs[maar_last + 1] = ((start >> 4) | MIPS_MAAR_V | (speculative?MIPS_MAAR_S:0));
+#if defined(CONFIG_CPU_MIPS32) && defined(CONFIG_64BIT_PHYS_ADDR)
+	maar_regs[maar_last + 1 + MIPS_MAAR_MAX] = MIPS_MAAR_HI_V | (start >> 36);
+#endif
+	maar_regs[maar_last] = ((end >> 4) | MIPS_MAAR_V | (speculative?MIPS_MAAR_S:0));
+#if defined(CONFIG_CPU_MIPS32) && defined(CONFIG_64BIT_PHYS_ADDR)
+	maar_regs[maar_last + MIPS_MAAR_MAX] = MIPS_MAAR_HI_V | (end >> 36);
+#endif
+	return;
+}
+
+void __init add_maar_region(phys_t start, phys_t end, int speculative)
+{
+	phys_t upper;
+	unsigned sbit;
+	int i;
+
+	if (nomaar_flag || !cpu_has_maar)
+		return;
+
+	if (maar_last < 0) {
+		maar_last = 0;
+		maar_update(start, end, speculative);
+		return;
+	}
+
+	/* try merge with previous region */
+	upper = maar_regs[maar_last];
+#if defined(CONFIG_CPU_MIPS32) && defined(CONFIG_64BIT_PHYS_ADDR)
+	upper |= (((phys_t)maar_regs[maar_last + MIPS_MAAR_MAX] << 32) & ~MIPS_MAAR_HI_V);
+#endif
+	sbit = (upper & MIPS_MAAR_S)? MIPS_MAAR_S : 0;
+	speculative = speculative? MIPS_MAAR_S : 0;
+	upper = ((upper << 4) + 0x10000) & ~0xffffUL;
+	if (((upper == (start & ~0xffffUL)) ||
+	     (upper == ((start + 0xffffUL) & ~0xffffUL))) &&
+	    (sbit == speculative)) {
+		if (speculative)
+			end = (end - 0x10000) & ~0xffff;
+		else
+			end = (end - 1) & ~0xffff;
+		maar_regs[maar_last] = (end >> 4) | MIPS_MAAR_V | sbit;
+#if defined(CONFIG_CPU_MIPS32) && defined(CONFIG_64BIT_PHYS_ADDR)
+		maar_regs[maar_last + MIPS_MAAR_MAX] = MIPS_MAAR_HI_V | (end >> 36);
+#endif
+		return;
+	}
+
+	maar_last += 2;
+	if (maar_last >= MIPS_MAAR_MAX) {
+		pr_err("Attempt to initialize more than %d MAARs\n", MIPS_MAAR_MAX);
+		for (i=0; i<MIPS_MAAR_MAX; i++) {
+			maar_regs[i] = 0;
+			maar_regs[i + MIPS_MAAR_MAX] = 0;
+		}
+		return;
+	}
+	maar_update(start, end, speculative);
+}
+
 static void __init bootmem_init(void)
 {
 	unsigned long reserved_end;
@@ -368,7 +513,6 @@ static void __init bootmem_init(void)
 	bootmap_size = init_bootmem_node(NODE_DATA(0), mapstart,
 					 min_low_pfn, max_low_pfn);
 
-
 	for (i = 0; i < boot_mem_map.nr_map; i++) {
 		unsigned long start, end;
 
@@ -391,9 +535,17 @@ static void __init bootmem_init(void)
 		if (end <= start)
 			continue;
 #endif
+		if ((!nomaar_flag) && cpu_has_maar &&
+		    ((boot_mem_map.map[i].type == BOOT_MEM_RAM) ||
+		     (boot_mem_map.map[i].type == BOOT_MEM_ROM_DATA) ||
+		     (boot_mem_map.map[i].type == BOOT_MEM_INUSE) ||
+		     (boot_mem_map.map[i].type == BOOT_MEM_INIT_RAM)))
+			add_maar_region(PFN_PHYS(start), PFN_PHYS(end), 1);
 
 		memblock_add_node(PFN_PHYS(start), PFN_PHYS(end - start), 0);
 	}
+	if (cpu_has_maar && !nomaar_flag)
+		maar_setup();
 
 	/*
 	 * Register fully available low RAM pages with the bootmem allocator.
@@ -552,6 +704,52 @@ static void __init arch_mem_addpart(phys_t mem, phys_t end, int type)
 	add_memory_region(mem, size, type);
 }
 
+#ifdef CONFIG_KEXEC
+static inline unsigned long long get_total_mem(void)
+{
+	unsigned long long total;
+
+	total = max_pfn - min_low_pfn;
+	return total << PAGE_SHIFT;
+}
+
+static void __init mips_parse_crashkernel(void)
+{
+	unsigned long long total_mem;
+	unsigned long long crash_size, crash_base;
+	int ret;
+
+	total_mem = get_total_mem();
+	ret = parse_crashkernel(boot_command_line, total_mem,
+				&crash_size, &crash_base);
+	if (ret != 0 || crash_size <= 0)
+		return;
+
+	crashk_res.start = crash_base;
+	crashk_res.end	 = crash_base + crash_size - 1;
+}
+
+static void __init request_crashkernel(struct resource *res)
+{
+	int ret;
+
+	ret = request_resource(res, &crashk_res);
+	if (!ret)
+		pr_info("Reserving %ldMB of memory at %ldMB for crashkernel\n",
+			(unsigned long)((crashk_res.end -
+					 crashk_res.start + 1) >> 20),
+			(unsigned long)(crashk_res.start  >> 20));
+}
+#else /* !defined(CONFIG_KEXEC)		*/
+static void __init mips_parse_crashkernel(void)
+{
+}
+
+static void __init request_crashkernel(struct resource *res)
+{
+}
+#endif /* !defined(CONFIG_KEXEC)  */
+
 static void __init arch_mem_init(char **cmdline_p)
 {
 	extern void plat_mem_setup(void);
@@ -608,6 +806,8 @@ static void __init arch_mem_init(char **cmdline_p)
 				BOOTMEM_DEFAULT);
 	}
 #endif
+
+	mips_parse_crashkernel();
 #ifdef CONFIG_KEXEC
 	if (crashk_res.start != crashk_res.end)
 		reserve_bootmem(crashk_res.start,
@@ -620,52 +820,6 @@ static void __init arch_mem_init(char **cmdline_p)
 	paging_init();
 }
 
-#ifdef CONFIG_KEXEC
-static inline unsigned long long get_total_mem(void)
-{
-	unsigned long long total;
-
-	total = max_pfn - min_low_pfn;
-	return total << PAGE_SHIFT;
-}
-
-static void __init mips_parse_crashkernel(void)
-{
-	unsigned long long total_mem;
-	unsigned long long crash_size, crash_base;
-	int ret;
-
-	total_mem = get_total_mem();
-	ret = parse_crashkernel(boot_command_line, total_mem,
-				&crash_size, &crash_base);
-	if (ret != 0 || crash_size <= 0)
-		return;
-
-	crashk_res.start = crash_base;
-	crashk_res.end	 = crash_base + crash_size - 1;
-}
-
-static void __init request_crashkernel(struct resource *res)
-{
-	int ret;
-
-	ret = request_resource(res, &crashk_res);
-	if (!ret)
-		pr_info("Reserving %ldMB of memory at %ldMB for crashkernel\n",
-			(unsigned long)((crashk_res.end -
-				crashk_res.start + 1) >> 20),
-			(unsigned long)(crashk_res.start  >> 20));
-}
-#else /* !defined(CONFIG_KEXEC)	 */
-static void __init mips_parse_crashkernel(void)
-{
-}
-
-static void __init request_crashkernel(struct resource *res)
-{
-}
-#endif /* !defined(CONFIG_KEXEC)  */
-
 static void __init resource_init(void)
 {
 	int i;
@@ -677,11 +831,6 @@ static void __init resource_init(void)
 	code_resource.end = __pa_symbol(&_etext) - 1;
 	data_resource.start = __pa_symbol(&_etext);
 	data_resource.end = __pa_symbol(&_edata) - 1;
-
-	/*
-	 * Request address space for all standard RAM.
-	 */
-	mips_parse_crashkernel();
 
 	for (i = 0; i < boot_mem_map.nr_map; i++) {
 		struct resource *res;
@@ -700,6 +849,9 @@ static void __init resource_init(void)
 		case BOOT_MEM_INIT_RAM:
 		case BOOT_MEM_ROM_DATA:
 			res->name = "System RAM";
+			break;
+		case BOOT_MEM_INUSE:
+			res->name = "InUse memory";
 			break;
 		case BOOT_MEM_RESERVED:
 		default:

@@ -129,13 +129,13 @@ int ptrace_getfpregs(struct task_struct *child, __u32 __user *data)
 			unsigned int vpflags = dvpe();
 			flags = read_c0_status();
 			__enable_fpu();
-			__asm__ __volatile__("cfc1\t%0,$0" : "=r" (tmp));
+			__asm__ __volatile__(".set push\n.set hardfloat\ncfc1\t%0,$0\n.set pop" : "=r" (tmp));
 			write_c0_status(flags);
 			evpe(vpflags);
 		} else {
 			flags = read_c0_status();
 			__enable_fpu();
-			__asm__ __volatile__("cfc1\t%0,$0" : "=r" (tmp));
+			__asm__ __volatile__(".set push\n.set hardfloat\ncfc1\t%0,$0\n.set pop" : "=r" (tmp));
 			write_c0_status(flags);
 		}
 	} else {
@@ -222,14 +222,14 @@ int ptrace_set_watch_regs(struct task_struct *child,
 	for (i = 0; i < current_cpu_data.watch_reg_use_cnt; i++) {
 		__get_user(lt[i], &addr->WATCH_STYLE.watchlo[i]);
 #ifdef CONFIG_32BIT
-		if (lt[i] & __UA_LIMIT)
+		if (lt[i] & USER_DS.seg)
 			return -EINVAL;
 #else
 		if (test_tsk_thread_flag(child, TIF_32BIT_ADDR)) {
 			if (lt[i] & 0xffffffff80000000UL)
 				return -EINVAL;
 		} else {
-			if (lt[i] & __UA_LIMIT)
+			if (lt[i] & USER_DS.seg)
 				return -EINVAL;
 		}
 #endif
@@ -348,13 +348,13 @@ long arch_ptrace(struct task_struct *child, long request,
 				unsigned int vpflags = dvpe();
 				flags = read_c0_status();
 				__enable_fpu();
-				__asm__ __volatile__("cfc1\t%0,$0": "=r" (tmp));
+				__asm__ __volatile__(".set push\n.set hardfloat\ncfc1\t%0,$0\n.set pop": "=r" (tmp));
 				write_c0_status(flags);
 				evpe(vpflags);
 			} else {
 				flags = read_c0_status();
 				__enable_fpu();
-				__asm__ __volatile__("cfc1\t%0,$0": "=r" (tmp));
+				__asm__ __volatile__(".set push\n.set hardfloat\ncfc1\t%0,$0\n.set pop": "=r" (tmp));
 				write_c0_status(flags);
 			}
 #ifdef CONFIG_MIPS_MT_SMTC
@@ -364,6 +364,7 @@ long arch_ptrace(struct task_struct *child, long request,
 			preempt_enable();
 			break;
 		}
+#ifndef CONFIG_CPU_MIPSR6
 		case DSP_BASE ... DSP_BASE + 5: {
 			dspreg_t *dregs;
 
@@ -384,6 +385,7 @@ long arch_ptrace(struct task_struct *child, long request,
 			}
 			tmp = child->thread.dsp.dspcontrol;
 			break;
+#endif /* CONFIG_CPU_MIPSR6 */
 		default:
 			tmp = 0;
 			ret = -EIO;
@@ -453,6 +455,7 @@ long arch_ptrace(struct task_struct *child, long request,
 		case FPC_CSR:
 			child->thread.fpu.fcr31 = data;
 			break;
+#ifndef CONFIG_CPU_MIPSR6
 		case DSP_BASE ... DSP_BASE + 5: {
 			dspreg_t *dregs;
 
@@ -472,6 +475,7 @@ long arch_ptrace(struct task_struct *child, long request,
 			}
 			child->thread.dsp.dspcontrol = data;
 			break;
+#endif /* CONFIG_CPU_MIPSR6 */
 		default:
 			/* The rest are not allowed. */
 			ret = -EIO;

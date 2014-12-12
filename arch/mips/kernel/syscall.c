@@ -135,8 +135,12 @@ static inline int mips_atomic_set(unsigned long addr, unsigned long new)
 		: "memory");
 	} else if (cpu_has_llsc) {
 		__asm__ __volatile__ (
-		"	.set	mips3					\n"
-		"	li	%[err], 0				\n"
+#ifdef CONFIG_CPU_MIPSR6
+		"       .set    mips64r6                                \n"
+#else
+		"       .set    mips3                                   \n"
+#endif
+		"       li      %[err], 0                               \n"
 		"1:	ll	%[old], (%[addr])			\n"
 		"	move	%[tmp], %[new]				\n"
 		"2:	sc	%[tmp], (%[addr])			\n"

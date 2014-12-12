@@ -16,61 +16,6 @@
 #include <asm/uaccess.h>
 
 /*
- * computes the checksum of a memory block at buff, length len,
- * and adds in "sum" (32-bit)
- *
- * returns a 32-bit number suitable for feeding into itself
- * or csum_tcpudp_magic
- *
- * this function must be called with even lengths, except
- * for the last fragment, which may be odd
- *
- * it's best to have buff aligned on a 32-bit boundary
- */
-__wsum csum_partial(const void *buff, int len, __wsum sum);
-
-__wsum __csum_partial_copy_user(const void *src, void *dst,
-				int len, __wsum sum, int *err_ptr);
-
-/*
- * this is a new version of the above that records errors it finds in *errp,
- * but continues and zeros the rest of the buffer.
- */
-static inline
-__wsum csum_partial_copy_from_user(const void __user *src, void *dst, int len,
-				   __wsum sum, int *err_ptr)
-{
-	might_fault();
-	return __csum_partial_copy_user((__force void *)src, dst,
-					len, sum, err_ptr);
-}
-
-/*
- * Copy and checksum to user
- */
-#define HAVE_CSUM_COPY_USER
-static inline
-__wsum csum_and_copy_to_user(const void *src, void __user *dst, int len,
-			     __wsum sum, int *err_ptr)
-{
-	might_fault();
-	if (access_ok(VERIFY_WRITE, dst, len))
-		return __csum_partial_copy_user(src, (__force void *)dst,
-						len, sum, err_ptr);
-	if (len)
-		*err_ptr = -EFAULT;
-
-	return (__force __wsum)-1; /* invalid checksum */
-}
-
-/*
- * the same as csum_partial, but copies from user space (but on MIPS
- * we have just one address space, so this is identical to the above)
- */
-__wsum csum_partial_copy_nocheck(const void *src, void *dst,
-				       int len, __wsum sum);
-
-/*
  *	Fold a partial checksum without adding pseudo headers
  */
 static inline __sum16 csum_fold(__wsum sum)
@@ -89,6 +34,177 @@ static inline __sum16 csum_fold(__wsum sum)
 	: "0" (sum));
 
 	return (__force __sum16)sum;
+}
+
+#ifdef CONFIG_CPU_MIPSR6
+
+extern __sum16 ip_fast_csum(const void *iph, unsigned int ihl);
+extern __sum16 ip_compute_csum(const void *buff, int len);
+
+#ifndef csum_tcpudp_nofold
+/*
+ * computes the checksum of the TCP/UDP pseudo-header
+ * returns a 16-bit checksum, already complemented
+ */
+extern __wsum
+csum_tcpudp_nofold(__be32 saddr, __be32 daddr, unsigned short len,
+		unsigned short proto, __wsum sum);
+#endif
+
+#ifndef csum_tcpudp_magic
+static inline __sum16
+csum_tcpudp_magic(__be32 saddr, __be32 daddr, unsigned short len,
+		  unsigned short proto, __wsum sum)
+{
+	return csum_fold(csum_tcpudp_nofold(saddr, daddr, len, proto, sum));
+}
+#endif
+
+/*
+ * computes the checksum of a memory block at buff, length len,
+ * and adds in "sum" (32-bit)
+ *
+ * returns a 32-bit number suitable for feeding into itself
+ * or csum_tcpudp_magic
+ *
+ * this function must be called with even lengths, except
+ * for the last fragment, which may be odd
+ *
+ * it's best to have buff aligned on a 32-bit boundary
+ */
+extern __wsum csum_partial(const void *buff, int len, __wsum sum);
+
+/*
+ * the same as csum_partial, but copies from src while it
+ * checksums
+ *
+ * here even more important to align src and dst on a 32-bit (or even
+ * better 64-bit) boundary
+ */
+extern __wsum csum_partial_copy(const void *src, void *dst, int len, __wsum sum);
+
+/*
+ * the same as csum_partial_copy, but copies from user space.
+ *
+ * here even more important to align src and dst on a 32-bit (or even
+ * better 64-bit) boundary
+ */
+extern __wsum csum_partial_copy_from_user(const void __user *src, void *dst,
+					int len, __wsum sum, int *csum_err);
+
+#ifndef csum_partial_copy_nocheck
+#define csum_partial_copy_nocheck(src, dst, len, sum)	\
+	csum_partial_copy((src), (dst), (len), (sum))
+#endif
+
+#else /* !CONFIG_CPU_MIPSR6 */
+
+/*
+ * computes the checksum of a memory block at buff, length len,
+ * and adds in "sum" (32-bit)
+ *
+ * returns a 32-bit number suitable for feeding into itself
+ * or csum_tcpudp_magic
+ *
+ * this function must be called with even lengths, except
+ * for the last fragment, which may be odd
+ *
+ * it's best to have buff aligned on a 32-bit boundary
+ */
+__wsum csum_partial(const void *buff, int len, __wsum sum);
+
+__wsum __csum_partial_copy_user(const void *src, void *dst,
+				int len, __wsum sum, int *err_ptr);
+#ifdef  CONFIG_EVA
+__wsum __csum_partial_copy_fromuser(const void *src, void *dst,
+				    int len, __wsum sum, int *err_ptr);
+__wsum __csum_partial_copy_touser(const void *src, void *dst,
+				  int len, __wsum sum, int *err_ptr);
+#endif
+
+/*
+ * this is a new version of the above that records errors it finds in *errp,
+ * but continues and zeros the rest of the buffer.
+ */
+static inline
+__wsum csum_partial_copy_from_user(const void __user *src, void *dst, int len,
+				   __wsum sum, int *err_ptr)
+{
+#ifndef CONFIG_EVA
+	might_fault();
+	return __csum_partial_copy_user((__force void *)src, dst,
+					    len, sum, err_ptr);
+#else
+	if (segment_eq(get_fs(), KERNEL_DS))
+		return __csum_partial_copy_user((__force void *)src, dst,
+						len, sum, err_ptr);
+	else {
+		might_fault();
+		return __csum_partial_copy_fromuser((__force void *)src, dst,
+						    len, sum, err_ptr);
+	}
+#endif
+}
+
+#define _HAVE_ARCH_COPY_AND_CSUM_FROM_USER
+static inline
+__wsum csum_and_copy_from_user (const void __user *src, void *dst,
+				      int len, __wsum sum, int *err_ptr)
+{
+	if (access_ok(VERIFY_READ, src, len))
+		return csum_partial_copy_from_user(src, dst, len, sum, err_ptr);
+
+	if (len)
+		*err_ptr = -EFAULT;
+
+	return sum;
+}
+
+/*
+ * Copy and checksum to user
+ */
+#define HAVE_CSUM_COPY_USER
+static inline
+__wsum csum_and_copy_to_user(const void *src, void __user *dst, int len,
+			     __wsum sum, int *err_ptr)
+{
+	if (access_ok(VERIFY_WRITE, dst, len)) {
+#ifndef CONFIG_EVA
+		might_fault();
+		return __csum_partial_copy_user(src, (__force void *)dst,
+						  len, sum, err_ptr);
+#else
+		if (segment_eq(get_fs(), KERNEL_DS))
+			return __csum_partial_copy_user(src, (__force void *)dst,
+							  len, sum, err_ptr);
+		else {
+			might_fault();
+			return __csum_partial_copy_touser(src, (__force void *)dst,
+							  len, sum, err_ptr);
+		}
+#endif
+	}
+	if (len)
+		*err_ptr = -EFAULT;
+
+	return (__force __wsum)-1; /* invalid checksum */
+}
+
+/*
+ * the same as csum_partial, but copies from user space (but on MIPS
+ * we have just one address space, so this is identical to the above)
+ */
+__wsum csum_partial_copy_nocheck(const void *src, void *dst,
+				       int len, __wsum sum);
+
+/*
+ * this routine is used for miscellaneous IP-like checksums, mainly
+ * in icmp.c
+ */
+
+static inline __sum16 ip_compute_csum(const void *buff, int len)
+{
+	return csum_fold(csum_partial(buff, len, 0));
 }
 
 /*
@@ -183,14 +299,7 @@ static inline __sum16 csum_tcpudp_magic(__be32 saddr, __be32 daddr,
 	return csum_fold(csum_tcpudp_nofold(saddr, daddr, len, proto, sum));
 }
 
-/*
- * this routine is used for miscellaneous IP-like checksums, mainly
- * in icmp.c
- */
-static inline __sum16 ip_compute_csum(const void *buff, int len)
-{
-	return csum_fold(csum_partial(buff, len, 0));
-}
+#endif /* !CONFIG_CPU_MIPSR6 */
 
 #define _HAVE_ARCH_IPV6_CSUM
 static __inline__ __sum16 csum_ipv6_magic(const struct in6_addr *saddr,

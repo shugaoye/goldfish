@@ -27,14 +27,18 @@
 #define GCMPGCBOFS(reg)		GCMPOFS(GCB, GCB, reg)
 #define GCMPGCBOFSn(reg, n)	GCMPOFSn(GCB, GCB, reg, n)
 #define GCMPCLCBOFS(reg)	GCMPOFS(CLCB, CCB, reg)
+#define GCMPCLCBOFSn(reg, n)     GCMPOFSn(CLCB, CCB, reg, n)
 #define GCMPCOCBOFS(reg)	GCMPOFS(COCB, CCB, reg)
+#define GCMPCOCBOFSn(reg, n)     GCMPOFSn(COCB, CCB, reg, n)
 #define GCMPGDBOFS(reg)		GCMPOFS(GDB, GDB, reg)
 
 /* GCMP register access */
 #define GCMPGCB(reg)			REGP(_gcmp_base, GCMPGCBOFS(reg))
 #define GCMPGCBn(reg, n)	       REGP(_gcmp_base, GCMPGCBOFSn(reg, n))
 #define GCMPCLCB(reg)			REGP(_gcmp_base, GCMPCLCBOFS(reg))
+#define GCMPCLCBn(reg, n)               REGP(_gcmp_base, GCMPCLCBOFSn(reg, n))
 #define GCMPCOCB(reg)			REGP(_gcmp_base, GCMPCOCBOFS(reg))
+#define GCMPCOCBn(reg, n)               REGP(_gcmp_base, GCMPCOCBOFSn(reg, n))
 #define GCMPGDB(reg)			REGP(_gcmp_base, GCMPGDBOFS(reg))
 
 /* Mask generation */
@@ -58,11 +62,16 @@
 #define	 GCMP_GCB_GCMPB_CMDEFTGT_MEM		1
 #define	 GCMP_GCB_GCMPB_CMDEFTGT_IOCU1		2
 #define	 GCMP_GCB_GCMPB_CMDEFTGT_IOCU2		3
-#define GCMP_GCB_CCMC_OFS		0x0010	/* Global CM Control */
+#define GCMP_GCB_GCMC_OFS               0x0010  /* Global CM Control */
+#define GCMP_GCB_GCMC2_OFS              0x0018  /* Global CM Control2 */
 #define GCMP_GCB_GCSRAP_OFS		0x0020	/* Global CSR Access Privilege */
 #define	 GCMP_GCB_GCSRAP_CMACCESS_SHF	0
 #define	 GCMP_GCB_GCSRAP_CMACCESS_MSK	GCMPGCBMSK(GCSRAP_CMACCESS, 8)
 #define GCMP_GCB_GCMPREV_OFS		0x0030	/* GCMP Revision Register */
+#define	 GCMP_GCB_GCMPREV_MAJOR_SHF	8
+#define	 GCMP_GCB_GCMPREV_MAJOR_MSK	GCMPGCBMSK(GCMPREV_MAJOR, 8)
+#define	 GCMP_GCB_GCMPREV_MINOR_SHF	0
+#define	 GCMP_GCB_GCMPREV_MINOR_MSK	GCMPGCBMSK(GCMPREV_MINOR, 8)
 #define GCMP_GCB_GCMEM_OFS		0x0040	/* Global CM Error Mask */
 #define GCMP_GCB_GCMEC_OFS		0x0048	/* Global CM Error Cause */
 #define	 GCMP_GCB_GMEC_ERROR_TYPE_SHF	27
@@ -73,11 +82,27 @@
 #define GCMP_GCB_GCMEO_OFS		0x0058	/* Global CM Error Multiple */
 #define	 GCMP_GCB_GMEO_ERROR_2ND_SHF	0
 #define	 GCMP_GCB_GMEO_ERROR_2ND_MSK	GCMPGCBMSK(GMEO_ERROR_2ND, 5)
-#define GCMP_GCB_GICBA_OFS		0x0080	/* Global Interrupt Controller Base Address */
+#define GCMP_GCB_GCMCUS_OFS             0x0060  /* GCR Custom Base */
+#define GCMP_GCB_GCMCST_OFS             0x0068  /* GCR Custom Status */
+#define GCMP_GCB_GCML2S_OFS             0x0070  /* Global L2 only Sync Register */
+#define  GCMP_GCB_GCML2S_EN_SHF         0
+#define  GCMP_GCB_GCML2S_EN_MSK         GCMPGCBMSK(GCML2S_EN, 1)
+#define GCMP_GCB_GICBA_OFS              0x0080  /* Global Interrupt Controller Base Address */
 #define	 GCMP_GCB_GICBA_BASE_SHF	17
 #define	 GCMP_GCB_GICBA_BASE_MSK	GCMPGCBMSK(GICBA_BASE, 15)
 #define	 GCMP_GCB_GICBA_EN_SHF		0
 #define	 GCMP_GCB_GICBA_EN_MSK		GCMPGCBMSK(GICBA_EN, 1)
+#define GCMP_GCB_CPCBA_OFS              0x0088  /* CPC Base Address */
+#define  GCMP_GCB_CPCBA_SHF             15
+#define  GCMP_GCB_CPCBA_MSK             GCMPGCBMSK(CPCBA, 17)
+#define  GCMP_GCB_CPCBA_EN_SHF          0
+#define  GCMP_GCB_CPCBA_EN_MASK         GCMPGCBMSK(CPCBA_EN, 1)
+
+#define GCMP_GCB_GICST_OFS              0x00D0  /* Global Interrupt Controller Status */
+#define GCMP_GCB_GCSHREV_OFS            0x00E0  /* Cache Revision */
+#define GCMP_GCB_CPCST_OFS              0x00F0  /* CPC Status */
+#define  GCMP_GCB_CPCST_EN_SHF          0
+#define  GCMP_GCB_CPCST_EN_MASK         GCMPGCBMSK(CPCST_EN, 1)
 
 /* GCB Regions */
 #define GCMP_GCB_CMxBASE_OFS(n)		(0x0090+16*(n))		/* Global Region[0-3] Base Address */
@@ -93,6 +118,23 @@
 #define	 GCMP_GCB_CMxMASK_CMREGTGT_IOCU1 2
 #define	 GCMP_GCB_CMxMASK_CMREGTGT_IOCU2 3
 
+#define GCMP_GCB_GAOR0BA_OFS              0x0190  /* Attribute-Only Region0 Base Address */
+#define GCMP_GCB_GAOR0MASK_OFS            0x0198  /* Attribute-Only Region0 Mask  */
+#define GCMP_GCB_GAOR1BA_OFS              0x01A0  /* Attribute-Only Region1 Base Address */
+#define GCMP_GCB_GAOR1MASK_OFS            0x01A8  /* Attribute-Only Region1 Mask */
+
+#define GCMP_GCB_IOCUREV_OFS              0x0200  /* IOCU Revision */
+
+#define GCMP_GCB_GAOR2BA_OFS              0x0210  /* Attribute-Only Region2 Base Address */
+#define GCMP_GCB_GAOR2MASK_OFS            0x0218  /* Attribute-Only Region2 Mask */
+#define GCMP_GCB_GAOR3BA_OFS              0x0220  /* Attribute-Only Region3 Base Address */
+#define GCMP_GCB_GAOR3MASK_OFS            0x0228  /* Attribute-Only Region3 Mask */
+#define GCMP_GCB_GCML2P_OFS               0x0300  /* L2 Prefetch Control */
+#define  GCMP_GCB_GCML2P_PAGE_MASK          0xfffff000  /* ... page mask */
+#define  GCMP_GCB_GCML2P_PFTEN              0x00000100  /* L2 Prefetch Enable */
+#define  GCMP_GCB_GCML2P_NPFT               0x000000ff  /* N.of L2 Prefetch  */
+#define GCMP_GCB_GCML2PB_OFS              0x0308  /* L2 Prefetch Control B */
+#define  GCMP_GCB_GCML2PB_CODE_PFTEN        0x00000100  /* L2 Code Prefetch Enable */
 
 /* Core local/Core other control block registers */
 #define GCMP_CCB_RESETR_OFS		0x0000			/* Reset Release */
@@ -101,7 +143,8 @@
 #define GCMP_CCB_COHCTL_OFS		0x0008			/* Coherence Control */
 #define	 GCMP_CCB_COHCTL_DOMAIN_SHF	0
 #define	 GCMP_CCB_COHCTL_DOMAIN_MSK	GCMPCCBMSK(COHCTL_DOMAIN, 8)
-#define GCMP_CCB_CFG_OFS		0x0010			/* Config */
+#define  GCMP_CCB_COHCTL_DOMAIN_ENABLE  (GCMP_CCB_COHCTL_DOMAIN_MSK)
+#define GCMP_CCB_CFG_OFS                0x0010                  /* Config */
 #define	 GCMP_CCB_CFG_IOCUTYPE_SHF	10
 #define	 GCMP_CCB_CFG_IOCUTYPE_MSK	GCMPCCBMSK(CFG_IOCUTYPE, 2)
 #define	  GCMP_CCB_CFG_IOCUTYPE_CPU	0
@@ -115,11 +158,27 @@
 #define GCMP_CCB_RESETBASE_OFS		0x0020		/* Reset Exception Base */
 #define	 GCMP_CCB_RESETBASE_BEV_SHF	12
 #define	 GCMP_CCB_RESETBASE_BEV_MSK	GCMPCCBMSK(RESETBASE_BEV, 20)
+#define GCMP_CCB_RESETBASEEXT_OFS       0x0030          /* Reset Exception Base Extention */
+#define  GCMP_CCB_RESETEXTBASE_BEV_SHF      20
+#define  GCMP_CCB_RESETEXTBASE_BEV_MASK_MSK GCMPCCBMSK(RESETEXTBASE_BEV, 8)
+#define  GCMP_CCB_RESETEXTBASE_LOWBITS_SHF     0
+#define  GCMP_CCB_RESETEXTBASE_BEV_MASK_LOWBITS GCMPCCBMSK(RESETEXTBASE_LOWBITS, 20)
 #define GCMP_CCB_ID_OFS			0x0028		/* Identification */
 #define GCMP_CCB_DINTGROUP_OFS		0x0030		/* DINT Group Participate */
 #define GCMP_CCB_DBGGROUP_OFS		0x0100		/* DebugBreak Group */
 
+#define GCMP_CCB_TCIDxPRI_OFS(n)        (0x0040+8*(n))  /* TCID x PRIORITY */
+
 extern int __init gcmp_probe(unsigned long, unsigned long);
-extern int __init gcmp_niocu(void);
 extern void __init gcmp_setregion(int, unsigned long, unsigned long, int);
+#ifdef CONFIG_MIPS_CMP
+extern int __init gcmp_niocu(void);
+extern int gcmp_present;
+#else
+#define gcmp_niocu(x)   (0)
+#define gcmp_present    (0)
+#endif
+extern unsigned long _gcmp_base;
+#define GCMP_L2SYNC_OFFSET              0x8100
+
 #endif /* _ASM_GCMPREGS_H */

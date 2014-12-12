@@ -20,6 +20,7 @@
 #include <asm/traps.h>
 #include <asm/fw/fw.h>
 #include <asm/gcmpregs.h>
+#include <asm/cpcregs.h>
 #include <asm/mips-boards/generic.h>
 #include <asm/mips-boards/malta.h>
 
@@ -84,10 +85,15 @@ static void __init mips_nmi_setup(void)
 	extern char except_vec_nmi;
 
 	base = cpu_has_veic ?
+#ifndef CONFIG_EVA
 		(void *)(CAC_BASE + 0xa80) :
 		(void *)(CAC_BASE + 0x380);
+#else
+		(void *)(YAMON_BASE + 0xa80) :
+		(void *)(YAMON_BASE + 0x380);
+#endif
 	memcpy(base, &except_vec_nmi, 0x80);
-	flush_icache_range((unsigned long)base, (unsigned long)base + 0x80);
+	local_flush_icache_range((unsigned long)base, (unsigned long)base + 0x80);
 }
 
 static void __init mips_ejtag_setup(void)
@@ -96,12 +102,18 @@ static void __init mips_ejtag_setup(void)
 	extern char except_vec_ejtag_debug;
 
 	base = cpu_has_veic ?
+#ifndef CONFIG_EVA
 		(void *)(CAC_BASE + 0xa00) :
 		(void *)(CAC_BASE + 0x300);
+#else
+		(void *)(YAMON_BASE + 0xa00) :
+		(void *)(YAMON_BASE + 0x300);
+#endif
 	memcpy(base, &except_vec_ejtag_debug, 0x80);
-	flush_icache_range((unsigned long)base, (unsigned long)base + 0x80);
+	local_flush_icache_range((unsigned long)base, (unsigned long)base + 0x80);
 }
 
+void __init prom_mem_check(int niocu);
 extern struct plat_smp_ops msmtc_smp_ops;
 
 void __init prom_init(void)
@@ -230,9 +242,39 @@ mips_pci_controller:
 			  MSC01_PCI_SWAP_BYTESWAP << MSC01_PCI_SWAP_MEM_SHF |
 			  MSC01_PCI_SWAP_BYTESWAP << MSC01_PCI_SWAP_BAR0_SHF);
 #endif
-		/* Fix up target memory mapping.  */
+		/* Fix up target memory mapping. */
+#ifndef CONFIG_EVA
 		MSC_READ(MSC01_PCI_BAR0, mask);
 		MSC_WRITE(MSC01_PCI_P2SCMSKL, mask & MSC01_PCI_BAR0_SIZE_MSK);
+#else
+#ifdef CONFIG_EVA_OLD_MALTA_MAP
+		/* Classic (old) Malta memory map:
+		   Setup the Malta max (2GB) memory for PCI DMA in host bridge
+		   in transparent addressing mode, starting from 80000000.
+		   Don't believe in registers content */
+		mask = 0x80000008;
+		MSC_WRITE(MSC01_PCI_BAR0, mask);
+
+		mask = 0x80000000;
+		MSC_WRITE(MSC01_PCI_HEAD4, mask);
+		MSC_WRITE(MSC01_PCI_P2SCMSKL, mask);
+		MSC_WRITE(MSC01_PCI_P2SCMAPL, mask);
+#else
+		/* New Malta memory map:
+		   Setup the Malta max memory (2G) for PCI DMA in host bridge
+		   in transparent addressing mode, starting from 00000000.
+		   Don't believe in registers content */
+		mask = 0x80000008;
+		MSC_WRITE(MSC01_PCI_BAR0, mask);
+
+		mask = 0x00000000;
+		MSC_WRITE(MSC01_PCI_HEAD4, mask);
+		mask = 0x80000000;
+		MSC_WRITE(MSC01_PCI_P2SCMSKL, mask);
+		mask = 0x00000000;
+		MSC_WRITE(MSC01_PCI_P2SCMAPL, mask);
+#endif
+#endif
 
 		/* Don't handle target retries indefinitely.  */
 		if ((data & MSC01_PCI_CFG_MAXRTRY_MSK) ==
@@ -267,10 +309,21 @@ mips_pci_controller:
 #ifdef CONFIG_SERIAL_8250_CONSOLE
 	console_config();
 #endif
+#ifdef CONFIG_MIPS_CMP
 	/* Early detection of CMP support */
-	if (gcmp_probe(GCMP_BASE_ADDR, GCMP_ADDRSPACE_SZ))
+	if ((mips_revision_sconid != MIPS_REVISION_SCON_ROCIT) &&
+	    (mips_revision_sconid != MIPS_REVISION_SCON_GT64120)) {
+		gcmp_present = 0;
+		printk("GCMP NOT present\n");
+	} else if (gcmp_probe(GCMP_BASE_ADDR_MALTA, GCMP_ADDRSPACE_SZ_MALTA)) {
+		cpc_probe(CPC_BASE_ADDR_MALTA, CPC_ADDRSPACE_SZ_MALTA);
+#if defined(CONFIG_EVA) && !defined(CONFIG_EVA_OLD_MALTA_MAP)
+		prom_mem_check(gcmp_niocu());
+#endif
 		if (!register_cmp_smp_ops())
 			return;
+	}
+#endif
 
 	if (!register_vsmp_smp_ops())
 		return;

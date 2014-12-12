@@ -832,6 +832,7 @@ static int vpe_elfload(struct vpe * v)
 	char *secstrings, *strtab = NULL;
 	unsigned int len, i, symindex = 0, strindex = 0, relocate = 0;
 	struct module mod;	// so we can re-use the relocations code
+	mm_segment_t old_fs;
 
 	memset(&mod, 0, sizeof(struct module));
 	strcpy(mod.name, "VPE loader");
@@ -973,8 +974,12 @@ static int vpe_elfload(struct vpe * v)
 	}
 
 	/* make sure it's physically written out */
+	/* flush the icache in correct context */
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
 	flush_icache_range((unsigned long)v->load_addr,
 			   (unsigned long)v->load_addr + v->len);
+	set_fs(old_fs);
 
 	if ((find_vpe_symbols(v, sechdrs, symindex, strtab, &mod)) < 0) {
 		if (v->__start == 0) {

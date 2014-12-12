@@ -12,6 +12,9 @@
 #include <linux/irq.h>
 #include <linux/clocksource.h>
 
+#include <linux/cpu.h>
+#include <linux/slab.h>
+
 #include <asm/io.h>
 #include <asm/gic.h>
 #include <asm/setup.h>
@@ -19,6 +22,7 @@
 #include <asm/gcmpregs.h>
 #include <linux/hardirq.h>
 #include <asm-generic/bitops/find.h>
+#include <asm/irq_cpu.h>
 
 unsigned int gic_frequency;
 unsigned int gic_present;
@@ -133,18 +137,26 @@ static void __init vpe_local_setup(unsigned int numvpes)
 
 		/* Are Interrupts locally routable? */
 		GICREAD(GIC_REG(VPE_OTHER, GIC_VPE_CTL), vpe_ctl);
-		if (vpe_ctl & GIC_VPE_CTL_TIMER_RTBL_MSK)
+		if (vpe_ctl & GIC_VPE_CTL_TIMER_RTBL_MSK) {
+			if (cp0_compare_irq >= 2)
+				timer_intr = cp0_compare_irq - 2;
 			GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_TIMER_MAP),
 				 GIC_MAP_TO_PIN_MSK | timer_intr);
+			mips_smp_c0_status_mask |= (0x400 << timer_intr);
+		}
 		if (cpu_has_veic) {
 			set_vi_handler(timer_intr + GIC_PIN_TO_VEC_OFFSET,
 				gic_eic_irq_dispatch);
 			gic_shared_intr_map[timer_intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_TIMER_MSK;
 		}
 
-		if (vpe_ctl & GIC_VPE_CTL_PERFCNT_RTBL_MSK)
+		if (vpe_ctl & GIC_VPE_CTL_PERFCNT_RTBL_MSK) {
+			if (cp0_perfcount_irq >= 2)
+				perf_intr = cp0_perfcount_irq - 2;
 			GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_PERFCTR_MAP),
 				 GIC_MAP_TO_PIN_MSK | perf_intr);
+			mips_smp_c0_status_mask |= (0x400 << perf_intr);
+		}
 		if (cpu_has_veic) {
 			set_vi_handler(perf_intr + GIC_PIN_TO_VEC_OFFSET, gic_eic_irq_dispatch);
 			gic_shared_intr_map[perf_intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_PERFCNT_MSK;
@@ -219,16 +231,15 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *cpumask,
 
 	/* Assumption : cpumask refers to a single CPU */
 	spin_lock_irqsave(&gic_lock, flags);
-	for (;;) {
-		/* Re-route this IRQ */
-		GIC_SH_MAP_TO_VPE_SMASK(irq, first_cpu(tmp));
 
-		/* Update the pcpu_masks */
-		for (i = 0; i < NR_CPUS; i++)
-			clear_bit(irq, pcpu_masks[i].pcpu_mask);
-		set_bit(irq, pcpu_masks[first_cpu(tmp)].pcpu_mask);
+	/* Re-route this IRQ */
+	GIC_SH_MAP_TO_VPE_SMASK(irq, first_cpu(tmp));
 
-	}
+	/* Update the pcpu_masks */
+	for (i = 0; i < NR_CPUS; i++)
+		clear_bit(irq, pcpu_masks[i].pcpu_mask);
+	set_bit(irq, pcpu_masks[first_cpu(tmp)].pcpu_mask);
+
 	cpumask_copy(d->affinity, cpumask);
 	spin_unlock_irqrestore(&gic_lock, flags);
 
@@ -365,3 +376,241 @@ void __init gic_init(unsigned long gic_base_addr,
 
 	gic_platform_init(numintrs, &gic_irq_controller);
 }
+
+
+#ifdef CONFIG_SYSFS
+static ssize_t show_gic_global(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	int n = 0;
+	int i,j;
+	int numints;
+
+	n = snprintf(buf, PAGE_SIZE,
+		"GIC Config Register\t\t%08x\n"
+		"GIC CounterLo\t\t\t%08x\n"
+		"GIC CounterHi\t\t\t%08x\n"
+		"GIC Revision\t\t\t%08x\n"
+		"Global Interrupt Polarity Registers:\t\t%08x %08x %08x %08x\n"
+		"\t\t\t\t\t\t%08x %08x %08x %08x\n"
+		"Global Interrupt Trigger Type Registers:\t%08x %08x %08x %08x\n"
+		"\t\t\t\t\t\t%08x %08x %08x %08x\n"
+		"Global Interrupt Dual Edge Registers:\t\t%08x %08x %08x %08x\n"
+		"\t\t\t\t\t\t%08x %08x %08x %08x\n"
+		"Global Interrupt Write Edge Register:\t\t%08x\n"
+		"Global Interrupt Reset Mask Registers:\t\t%08x %08x %08x %08x\n"
+		"\t\t\t\t\t\t%08x %08x %08x %08x\n"
+		"Global Interrupt Set Mask Registers:\t\t%08x %08x %08x %08x\n"
+		"\t\t\t\t\t\t%08x %08x %08x %08x\n"
+		"Global Interrupt Mask Registers:\t\t%08x %08x %08x %08x\n"
+		"\t\t\t\t\t\t%08x %08x %08x %08x\n"
+		"Global Interrupt Pending Registers:\t\t%08x %08x %08x %08x\n"
+		"\t\t\t\t\t\t%08x %08x %08x %08x\n"
+		,
+		GIC_REG(SHARED,GIC_SH_CONFIG),
+		GIC_REG(SHARED,GIC_SH_COUNTER_31_00),
+		GIC_REG(SHARED,GIC_SH_COUNTER_63_32),
+		GIC_REG(SHARED,GIC_SH_REVISIONID),
+		GIC_REG(SHARED,GIC_SH_POL_31_0),        GIC_REG(SHARED,GIC_SH_POL_63_32),
+		GIC_REG(SHARED,GIC_SH_POL_95_64),       GIC_REG(SHARED,GIC_SH_POL_127_96),
+		GIC_REG(SHARED,GIC_SH_POL_159_128),     GIC_REG(SHARED,GIC_SH_POL_191_160),
+		GIC_REG(SHARED,GIC_SH_POL_223_192),     GIC_REG(SHARED,GIC_SH_POL_255_224),
+		GIC_REG(SHARED,GIC_SH_TRIG_31_0),       GIC_REG(SHARED,GIC_SH_TRIG_63_32),
+		GIC_REG(SHARED,GIC_SH_TRIG_95_64),      GIC_REG(SHARED,GIC_SH_TRIG_127_96),
+		GIC_REG(SHARED,GIC_SH_TRIG_159_128),    GIC_REG(SHARED,GIC_SH_TRIG_191_160),
+		GIC_REG(SHARED,GIC_SH_TRIG_223_192),    GIC_REG(SHARED,GIC_SH_TRIG_255_224),
+		GIC_REG(SHARED,GIC_SH_DUAL_31_0),       GIC_REG(SHARED,GIC_SH_DUAL_63_32),
+		GIC_REG(SHARED,GIC_SH_DUAL_95_64),      GIC_REG(SHARED,GIC_SH_DUAL_127_96),
+		GIC_REG(SHARED,GIC_SH_DUAL_159_128),    GIC_REG(SHARED,GIC_SH_DUAL_191_160),
+		GIC_REG(SHARED,GIC_SH_DUAL_223_192),    GIC_REG(SHARED,GIC_SH_DUAL_255_224),
+		GIC_REG(SHARED,GIC_SH_WEDGE),
+		GIC_REG(SHARED,GIC_SH_RMASK_31_0),      GIC_REG(SHARED,GIC_SH_RMASK_63_32),
+		GIC_REG(SHARED,GIC_SH_RMASK_95_64),     GIC_REG(SHARED,GIC_SH_RMASK_127_96),
+		GIC_REG(SHARED,GIC_SH_RMASK_159_128),   GIC_REG(SHARED,GIC_SH_RMASK_191_160),
+		GIC_REG(SHARED,GIC_SH_RMASK_223_192),   GIC_REG(SHARED,GIC_SH_RMASK_255_224),
+		GIC_REG(SHARED,GIC_SH_SMASK_31_0),      GIC_REG(SHARED,GIC_SH_SMASK_63_32),
+		GIC_REG(SHARED,GIC_SH_SMASK_95_64),     GIC_REG(SHARED,GIC_SH_SMASK_127_96),
+		GIC_REG(SHARED,GIC_SH_SMASK_159_128),   GIC_REG(SHARED,GIC_SH_SMASK_191_160),
+		GIC_REG(SHARED,GIC_SH_SMASK_223_192),   GIC_REG(SHARED,GIC_SH_SMASK_255_224),
+		GIC_REG(SHARED,GIC_SH_MASK_31_0),       GIC_REG(SHARED,GIC_SH_MASK_63_32),
+		GIC_REG(SHARED,GIC_SH_MASK_95_64),      GIC_REG(SHARED,GIC_SH_MASK_127_96),
+		GIC_REG(SHARED,GIC_SH_MASK_159_128),    GIC_REG(SHARED,GIC_SH_MASK_191_160),
+		GIC_REG(SHARED,GIC_SH_MASK_223_192),    GIC_REG(SHARED,GIC_SH_MASK_255_224),
+		GIC_REG(SHARED,GIC_SH_PEND_31_0),       GIC_REG(SHARED,GIC_SH_PEND_63_32),
+		GIC_REG(SHARED,GIC_SH_PEND_95_64),      GIC_REG(SHARED,GIC_SH_PEND_127_96),
+		GIC_REG(SHARED,GIC_SH_PEND_159_128),    GIC_REG(SHARED,GIC_SH_PEND_191_160),
+		GIC_REG(SHARED,GIC_SH_PEND_223_192),    GIC_REG(SHARED,GIC_SH_PEND_255_224)
+	);
+
+	numints = (GIC_REG(SHARED,GIC_SH_CONFIG) & GIC_SH_CONFIG_NUMINTRS_MSK) >> GIC_SH_CONFIG_NUMINTRS_SHF;
+	numints = (numints + 1) * 8;
+
+	n += snprintf(buf+n, PAGE_SIZE-n,
+		"\nGlobal Interrupt Map SrcX to Pin:\n");
+	for (i=0; i<numints; i++) {
+
+		if ((i % 8) == 0)
+			n += snprintf(buf+n, PAGE_SIZE-n, "%02x:\t",i);
+		n += snprintf(buf+n, PAGE_SIZE-n,
+			"%08x ",GIC_REG_ADDR(SHARED,GIC_SH_MAP_TO_PIN(i)));
+		if ((i % 8) == 7)
+			n += snprintf(buf+n, PAGE_SIZE-n, "\n");
+	};
+
+	n += snprintf(buf+n, PAGE_SIZE-n,
+		"\nGlobal Interrupt Map SrcX to VPE:\n");
+	for (i=0; i<numints; i++) {
+		if ((i % 4) == 0)
+			n += snprintf(buf+n, PAGE_SIZE-n, "%02x:\t",i);
+		for (j=0; j<2; j++) {
+			n += snprintf(buf+n, PAGE_SIZE-n,
+			    "%08x ",GIC_REG_ADDR(SHARED,GIC_SH_INTR_MAP_TO_VPE_BASE_OFS + ((j * 4) + (i * 32))));
+		};
+		n += snprintf(buf+n, PAGE_SIZE-n, "\t");
+		if ((i % 4) == 3)
+			n += snprintf(buf+n, PAGE_SIZE-n, "\n");
+	};
+	n += snprintf(buf+n, PAGE_SIZE-n,
+		"\nDINT Send to Group Register\t\t%08x\n",
+		GIC_REG(SHARED,GIC_DINT));
+
+	return n;
+}
+
+static ssize_t show_gic_local(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	int n = 0;
+	int i;
+
+	GIC_REG(VPE_LOCAL,GIC_VPE_OTHER_ADDR) = (dev->id);
+
+	n += snprintf(buf+n, PAGE_SIZE-n,
+		"Local Interrupt Control Register:\t\t%08x\n"
+		"Local Interrupt Pending Register:\t\t%08x\n"
+		"Local Mask Register:\t\t\t\t%08x\n"
+		"Local Reset Mask Register:\t\t\t%08x\n"
+		"Local Set Mask Register:\t\t\t%08x\n"
+		"Local WatchDog Map-to-Pin Register:\t\t%08x\n"
+		"Local GIC Counter/Compare Map-to-Pin Register:\t%08x\n"
+		"Local CPU Timer Map-to-Pin Register:\t\t%08x\n"
+		"Local CPU Fast Debug Channel Map-to-Pin:\t%08x\n"
+		"Local Perf Counter Map-to-Pin Register:\t\t%08x\n"
+		"Local SWInt0 Map-to-Pin Register:\t\t%08x\n"
+		"Local SWInt1 Map-to-Pin Register:\t\t%08x\n"
+		"VPE-Other Addressing Register:\t\t\t%08x\n"
+		"VPE-Local Identification Register:\t\t%08x\n"
+		"Programmable/Watchdog Timer0 Config Register:\t\t%08x\n"
+		"Programmable/Watchdog Timer0 Count Register:\t\t%08x\n"
+		"Programmable/Watchdog Timer0 Initial Count Register:\t%08x\n"
+		"CompareLo Register:\t\t\t\t%08x\n"
+		"CompareHi Register:\t\t\t\t%08x\n"
+		,
+		GIC_REG(VPE_OTHER,GIC_VPE_CTL),
+		GIC_REG(VPE_OTHER,GIC_VPE_PEND),
+		GIC_REG(VPE_OTHER,GIC_VPE_MASK),
+		GIC_REG(VPE_OTHER,GIC_VPE_RMASK),
+		GIC_REG(VPE_OTHER,GIC_VPE_SMASK),
+		GIC_REG(VPE_OTHER,GIC_VPE_WD_MAP),
+		GIC_REG(VPE_OTHER,GIC_VPE_COMPARE_MAP),
+		GIC_REG(VPE_OTHER,GIC_VPE_TIMER_MAP),
+		GIC_REG(VPE_OTHER,GIC_VPE_FDEBUG_MAP),
+		GIC_REG(VPE_OTHER,GIC_VPE_PERFCTR_MAP),
+		GIC_REG(VPE_OTHER,GIC_VPE_SWINT0_MAP),
+		GIC_REG(VPE_OTHER,GIC_VPE_SWINT1_MAP),
+		GIC_REG(VPE_OTHER,GIC_VPE_OTHER_ADDR),
+		GIC_REG(VPE_OTHER,GIC_VPE_ID),
+		GIC_REG(VPE_OTHER,GIC_VPE_WD_CONFIG0),
+		GIC_REG(VPE_OTHER,GIC_VPE_WD_COUNT0),
+		GIC_REG(VPE_OTHER,GIC_VPE_WD_INITIAL0),
+		GIC_REG(VPE_OTHER,GIC_VPE_COMPARE_LO),
+		GIC_REG(VPE_OTHER,GIC_VPE_COMPARE_HI)
+	);
+
+	n += snprintf(buf+n, PAGE_SIZE-n,
+		"\nEIC Shadow Set for Interrupt SrcX:\n");
+	for (i=0; i<64; i++) {
+		if ((i % 8) == 0)
+			n += snprintf(buf+n, PAGE_SIZE-n, "%02x:\t",i);
+		n += snprintf(buf+n, PAGE_SIZE-n,
+			"%08x ",GIC_REG_ADDR(VPE_OTHER,GIC_VPE_EIC_SS(i)));
+		if ((i % 8) == 7)
+			n += snprintf(buf+n, PAGE_SIZE-n, "\n");
+	};
+
+	n += snprintf(buf+n, PAGE_SIZE-n,
+		"\nVPE Local DINT Group Participate Register:\t%08x\n"
+		"VPE Local DebugBreak Group Register:\t\t%08x\n"
+		,
+		GIC_REG(VPE_OTHER,GIC_VPE_DINT),
+		GIC_REG(VPE_OTHER,GIC_VPE_DEBUG_BREAK));
+
+	return n;
+}
+
+static DEVICE_ATTR(gic_global, 0444, show_gic_global, NULL);
+static DEVICE_ATTR(gic_local, 0444, show_gic_local, NULL);
+
+static struct bus_type gic_subsys = {
+	.name = "gic",
+	.dev_name = "gic",
+};
+
+
+
+static __cpuinit int gic_add_vpe(int cpu)
+{
+	struct device *dev;
+	int err;
+	char name[16];
+
+	dev = kzalloc(sizeof *dev, GFP_KERNEL);
+	if (!dev)
+		return -ENOMEM;
+
+	dev->id = cpu;
+	dev->bus = &gic_subsys;
+	snprintf(name, sizeof name, "vpe%d",cpu);
+	dev->init_name = name;
+
+	err = device_register(dev);
+	if (err)
+		return err;
+
+	err = device_create_file(dev, &dev_attr_gic_local);
+	if (err)
+		return err;
+
+	return 0;
+}
+
+static int __init init_gic_sysfs(void)
+{
+	int rc;
+	int vpeN;
+	int vpe;
+
+	if (!gic_present)
+		return 0;
+
+	rc = subsys_system_register(&gic_subsys, NULL);
+	if (rc)
+		return rc;
+
+	rc = device_create_file(gic_subsys.dev_root, &dev_attr_gic_global);
+	if (rc)
+		return rc;
+
+	vpeN = ((GIC_REG(SHARED,GIC_SH_CONFIG) & GIC_SH_CONFIG_NUMVPES_MSK) >> GIC_SH_CONFIG_NUMVPES_SHF) + 1;
+	for (vpe=0; vpe<vpeN; vpe++) {
+		rc = gic_add_vpe(vpe);
+		if (rc)
+			return rc;
+	}
+
+	return 0;
+}
+
+device_initcall_sync(init_gic_sysfs);
+
+#endif /* CONFIG_SYSFS */

@@ -24,6 +24,12 @@
 #ifndef cpu_has_tlb
 #define cpu_has_tlb		(cpu_data[0].options & MIPS_CPU_TLB)
 #endif
+#ifndef cpu_has_tlbinv
+#define cpu_has_tlbinv          (cpu_data[0].options & MIPS_CPU_TLBINV)
+#endif
+#ifndef cpu_has_tlbinv_full
+#define cpu_has_tlbinv_full     (cpu_data[0].options & MIPS_CPU_TLBINV_FULL)
+#endif
 #ifndef cpu_has_4kex
 #define cpu_has_4kex		(cpu_data[0].options & MIPS_CPU_4KEX)
 #endif
@@ -69,7 +75,11 @@
 #define cpu_has_cache_cdex_s	(cpu_data[0].options & MIPS_CPU_CACHE_CDEX_S)
 #endif
 #ifndef cpu_has_prefetch
-#define cpu_has_prefetch	(cpu_data[0].options & MIPS_CPU_PREFETCH)
+#ifdef CONFIG_CPU_MIPSR6
+#define cpu_has_prefetch        (0)
+#else
+#define cpu_has_prefetch        (cpu_data[0].options & MIPS_CPU_PREFETCH)
+#endif
 #endif
 #ifndef cpu_has_mcheck
 #define cpu_has_mcheck		(cpu_data[0].options & MIPS_CPU_MCHECK)
@@ -98,11 +108,27 @@
 #ifndef cpu_has_rixi
 #define cpu_has_rixi		(cpu_data[0].options & MIPS_CPU_RIXI)
 #endif
+#ifndef cpu_has_himem
+#define cpu_has_himem           (cpu_data[0].options2 & MIPS_CPU_HIMEM)
+#endif
+#ifndef cpu_has_rixi_except
+#define cpu_has_rixi_except     (cpu_data[0].options & MIPS_CPU_RIXI_EXCEPT)
+#endif
 #ifndef cpu_has_mmips
-#define cpu_has_mmips		(cpu_data[0].options & MIPS_CPU_MICROMIPS)
+# ifdef CONFIG_SYS_SUPPORTS_MICROMIPS
+#  define cpu_has_mmips		(cpu_data[0].options & MIPS_CPU_MICROMIPS)
+# else
+#  define cpu_has_mmips		0
+# endif
 #endif
 #ifndef cpu_has_vtag_icache
 #define cpu_has_vtag_icache	(cpu_data[0].icache.flags & MIPS_CACHE_VTAG)
+#endif
+#ifndef cpu_has_vtag_dcache
+#define cpu_has_vtag_dcache     (cpu_data[0].dcache.flags & MIPS_CACHE_VTAG)
+#endif
+#ifndef cpu_has_ic_aliases
+#define cpu_has_ic_aliases      (cpu_data[0].icache.flags & MIPS_CACHE_ALIASES)
 #endif
 #ifndef cpu_has_dc_aliases
 #define cpu_has_dc_aliases	(cpu_data[0].dcache.flags & MIPS_CACHE_ALIASES)
@@ -116,6 +142,27 @@
 #ifndef cpu_has_local_ebase
 #define cpu_has_local_ebase	1
 #endif
+#ifdef CONFIG_MIPS_CMP
+#ifndef cpu_has_cm2
+#define cpu_has_cm2             (cpu_data[0].options & MIPS_CPU_CM2)
+#endif
+#ifndef cpu_has_cm2_l2sync
+#define cpu_has_cm2_l2sync      (cpu_data[0].options & MIPS_CPU_CM2_L2SYNC)
+#endif
+#else
+#define cpu_has_cm2             (0)
+#define cpu_has_cm2_l2sync      (0)
+#endif
+#ifndef cpu_has_maar
+#define cpu_has_maar            (cpu_data[0].options2 & MIPS_CPU_MAAR)
+#endif
+#ifndef cpu_has_fre
+#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+#define cpu_has_fre             (cpu_data[0].options2 & MIPS_CPU_FRE)
+#else
+#define cpu_has_fre             0
+#endif
+#endif /* cpu_has_fre */
 
 /*
  * I-Cache snoops remote store.	 This only matters on SMP.  Some multiprocessors
@@ -155,36 +202,51 @@
 # ifndef cpu_has_mips32r2
 # define cpu_has_mips32r2	(cpu_data[0].isa_level & MIPS_CPU_ISA_M32R2)
 # endif
+# ifndef cpu_has_mips32r6
+# define cpu_has_mips32r6       (cpu_data[0].isa_level & MIPS_CPU_ISA_M32R6)
+# endif
 # ifndef cpu_has_mips64r1
 # define cpu_has_mips64r1	(cpu_data[0].isa_level & MIPS_CPU_ISA_M64R1)
 # endif
 # ifndef cpu_has_mips64r2
 # define cpu_has_mips64r2	(cpu_data[0].isa_level & MIPS_CPU_ISA_M64R2)
 # endif
+# ifndef cpu_has_mips64r6
+# define cpu_has_mips64r6       (cpu_data[0].isa_level & MIPS_CPU_ISA_M64R6)
+# endif
 
 /*
  * Shortcuts ...
  */
-#define cpu_has_mips32	(cpu_has_mips32r1 | cpu_has_mips32r2)
-#define cpu_has_mips64	(cpu_has_mips64r1 | cpu_has_mips64r2)
+#define cpu_has_mips32  (cpu_has_mips32r1 | cpu_has_mips32r2 | cpu_has_mips32r6)
+#define cpu_has_mips64  (cpu_has_mips64r1 | cpu_has_mips64r2 | cpu_has_mips64r6)
 #define cpu_has_mips_r1 (cpu_has_mips32r1 | cpu_has_mips64r1)
 #define cpu_has_mips_r2 (cpu_has_mips32r2 | cpu_has_mips64r2)
+#define cpu_has_mips_r6 (cpu_has_mips32r6 | cpu_has_mips64r6)
 #define cpu_has_mips_r	(cpu_has_mips32r1 | cpu_has_mips32r2 | \
-			 cpu_has_mips64r1 | cpu_has_mips64r2)
+			 cpu_has_mips64r1 | cpu_has_mips64r2 | \
+			 cpu_has_mips32r6 | cpu_has_mips64r6)
 
 #ifndef cpu_has_mips_r2_exec_hazard
-#define cpu_has_mips_r2_exec_hazard cpu_has_mips_r2
+#define cpu_has_mips_r2_exec_hazard (cpu_has_mips_r2 | cpu_has_mips_r6)
 #endif
 
 /*
  * MIPS32, MIPS64, VR5500, IDT32332, IDT32334 and maybe a few other
- * pre-MIPS32/MIPS53 processors have CLO, CLZ.	The IDT RC64574 is 64-bit and
+ * pre-MIPS32/MIPS64 processors have CLO, CLZ.	The IDT RC64574 is 64-bit and
  * has CLO and CLZ but not DCLO nor DCLZ.  For 64-bit kernels
  * cpu_has_clo_clz also indicates the availability of DCLO and DCLZ.
  */
 # ifndef cpu_has_clo_clz
 # define cpu_has_clo_clz	cpu_has_mips_r
 # endif
+
+#ifdef CONFIG_CPU_MIPSR6
+
+#define cpu_has_dsp     0
+#define cpu_has_dsp2    0
+
+#else /* !CONFIG_CPU_MIPSR6 */
 
 #ifndef cpu_has_dsp
 #define cpu_has_dsp		(cpu_data[0].ases & MIPS_ASE_DSP)
@@ -194,12 +256,22 @@
 #define cpu_has_dsp2		(cpu_data[0].ases & MIPS_ASE_DSP2P)
 #endif
 
+#endif /* CONFIG_CPU_MIPSR6 */
+
 #ifndef cpu_has_mipsmt
 #define cpu_has_mipsmt		(cpu_data[0].ases & MIPS_ASE_MIPSMT)
 #endif
 
 #ifndef cpu_has_userlocal
 #define cpu_has_userlocal	(cpu_data[0].options & MIPS_CPU_ULRI)
+#endif
+
+#ifndef cpu_has_segments
+#define cpu_has_segments	(cpu_data[0].options & MIPS_CPU_SEGMENTS)
+#endif
+
+#ifndef cpu_has_eva
+#define cpu_has_eva		(cpu_data[0].options & MIPS_CPU_EVA)
 #endif
 
 #ifdef CONFIG_32BIT

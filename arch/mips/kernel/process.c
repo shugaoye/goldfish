@@ -41,6 +41,7 @@
 #include <asm/isadep.h>
 #include <asm/inst.h>
 #include <asm/stacktrace.h>
+#include <asm/vdso.h>
 
 #ifdef CONFIG_HOTPLUG_CPU
 void arch_cpu_idle_dead(void)
@@ -58,11 +59,10 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long sp)
 {
 	unsigned long status;
 
+	mips_thread_vdso(current_thread_info());
+
 	/* New thread loses kernel privileges. */
 	status = regs->cp0_status & ~(ST0_CU0|ST0_CU1|ST0_FR|KU_MASK);
-#ifdef CONFIG_64BIT
-	status |= test_thread_flag(TIF_32BIT_REGS) ? 0 : ST0_FR;
-#endif
 	status |= KU_USER;
 	regs->cp0_status = status;
 	clear_used_math();
@@ -75,6 +75,7 @@ void start_thread(struct pt_regs * regs, unsigned long pc, unsigned long sp)
 
 void exit_thread(void)
 {
+	arch_release_thread_info(current_thread_info());
 }
 
 void flush_thread(void)
@@ -100,6 +101,9 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 		save_dsp(p);
 
 	preempt_enable();
+
+	ti->vdso_page = NULL;
+	mips_thread_vdso(ti);
 
 	/* set up new TSS. */
 	childregs = (struct pt_regs *) childksp - 1;
@@ -282,9 +286,19 @@ static inline int is_jump_ins(union mips_instruction *ip)
 		return 1;
 	if (ip->j_format.opcode == jal_op)
 		return 1;
+#ifdef CONFIG_CPU_MIPSR6
+	if (((ip->i_format.opcode == jump_op) ||   /* jic */
+	     (ip->i_format.opcode == jump2_op)) && /* jialc */
+	    (ip->i_format.rs == 0))
+		return 1;
+	if (ip->r_format.opcode != spec_op)
+		return 0;
+	return ((ip->r_format.func == jalr_op) && !ip->r_format.rt);
+#else
 	if (ip->r_format.opcode != spec_op)
 		return 0;
 	return ip->r_format.func == jalr_op || ip->r_format.func == jr_op;
+#endif
 #endif
 }
 

@@ -142,9 +142,13 @@ FEXPORT(__kernel_entry)
 
 	__REF
 
+#ifdef CONFIG_EVA
+	.align  8
+#endif
+
 NESTED(kernel_entry, 16, sp)			# kernel entry point
 
-	kernel_entry_setup			# cpu specific setup
+	kernel_entry_setup                      # cpu specific setup
 
 	setup_c0_status_pri
 
@@ -152,6 +156,9 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	   so we jump there.  */
 	PTR_LA	t0, 0f
 	jr	t0
+#ifdef CONFIG_EVA
+	.align  8
+#endif
 0:
 
 #ifdef CONFIG_MIPS_MT_SMTC
@@ -172,6 +179,23 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	mtc0	t0, CP0_STATUS
 #endif /* CONFIG_MIPS_MT_SMTC */
 
+#ifdef CONFIG_MIPS_APPENDED_DTB
+       PTR_LA          t0, __appended_dtb
+       PTR_LI          t3, 0
+
+#ifdef CONFIG_CPU_BIG_ENDIAN
+       PTR_LI          t1, 0xd00dfeed
+#else
+       PTR_LI          t1, 0xedfe0dd0
+#endif
+       LONG_L          t2, (t0)
+       bne             t1, t2, not_found
+
+       PTR_LA          t3, __appended_dtb
+
+not_found:
+#endif
+
 	PTR_LA		t0, __bss_start		# clear .bss
 	LONG_S		zero, (t0)
 	PTR_LA		t1, __bss_stop - LONGSIZE
@@ -184,6 +208,10 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
 	LONG_S		a1, fw_arg1
 	LONG_S		a2, fw_arg2
 	LONG_S		a3, fw_arg3
+
+#ifdef CONFIG_MIPS_APPENDED_DTB
+       LONG_S          t3, initial_boot_params
+#endif
 
 	MTC0		zero, CP0_CONTEXT	# clear context register
 	PTR_LA		$28, init_thread_union
@@ -204,7 +232,13 @@ NESTED(kernel_entry, 16, sp)			# kernel entry point
  * SMP slave cpus entry point.	Board specific code for bootstrap calls this
  * function after setting up the stack and gp registers.
  */
+
+#ifdef CONFIG_EVA
+	.align  8
+#endif
+
 NESTED(smp_bootstrap, 16, sp)
+
 #ifdef CONFIG_MIPS_MT_SMTC
 	/*
 	 * Read-modify-writes of Status must be atomic, and this
@@ -216,8 +250,10 @@ NESTED(smp_bootstrap, 16, sp)
 	DMT	10	# dmt t2 /* t0, t1 are used by CLI and setup_c0_status() */
 	jal	mips_ihb
 #endif /* CONFIG_MIPS_MT_SMTC */
-	setup_c0_status_sec
+
 	smp_slave_setup
+	setup_c0_status_sec
+
 #ifdef CONFIG_MIPS_MT_SMTC
 	andi	t2, t2, VPECONTROL_TE
 	beqz	t2, 2f
@@ -225,6 +261,9 @@ NESTED(smp_bootstrap, 16, sp)
 2:
 #endif /* CONFIG_MIPS_MT_SMTC */
 	j	start_secondary
+#ifdef CONFIG_EVA
+	.align  8
+#endif
 	END(smp_bootstrap)
 #endif /* CONFIG_SMP */
 

@@ -24,12 +24,6 @@
 #define ASCII_DISPLAY_POS_BASE	   0x1f000418
 
 /*
- * Reset register.
- */
-#define SOFTRES_REG	  0x1f000500
-#define GORESET		  0x42
-
-/*
  * Revision register.
  */
 #define MIPS_REVISION_REG		   0x1fc00010
@@ -75,6 +69,9 @@ extern int mips_revision_sconid;
 
 #ifdef CONFIG_OF
 extern struct boot_param_header __dtb_start;
+#ifdef CONFIG_MIPS_APPENDED_DTB
+extern struct boot_param_header __appended_dtb;
+#endif
 #endif
 
 #ifdef CONFIG_PCI

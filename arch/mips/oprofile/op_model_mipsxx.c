@@ -244,7 +244,7 @@ static int mipsxx_perfcount_handler(void)
 	unsigned int counter;
 	int handled = IRQ_NONE;
 
-	if (cpu_has_mips_r2 && !(read_c0_cause() & (1 << 26)))
+	if ((cpu_has_mips_r2 || cpu_has_mips_r6) && !(read_c0_cause() & (1 << 26)))
 		return handled;
 
 	switch (counters) {
@@ -374,6 +374,22 @@ static int __init mipsxx_init(void)
 
 	case CPU_74K:
 		op_model_mipsxx_ops.cpu_type = "mips/74K";
+		break;
+
+	case CPU_PROAPTIV:
+		op_model_mipsxx_ops.cpu_type = "mips/proAptiv";
+		break;
+
+	case CPU_INTERAPTIV:
+		op_model_mipsxx_ops.cpu_type = "mips/interAptiv";
+		break;
+
+	case CPU_P5600:
+		op_model_mipsxx_ops.cpu_type = "mips/P5600";
+		break;
+
+	case CPU_VIRTUOSO:
+		op_model_mipsxx_ops.cpu_type = "mips/Virtuoso";
 		break;
 
 	case CPU_5KC:

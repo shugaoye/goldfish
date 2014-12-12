@@ -182,6 +182,10 @@ void __init check_wait(void)
 	case CPU_24K:
 	case CPU_34K:
 	case CPU_1004K:
+	case CPU_PROAPTIV:
+	case CPU_INTERAPTIV:
+	case CPU_VIRTUOSO:
+	case CPU_P5600:
 		cpu_wait = r4k_wait;
 		if (read_c0_config7() & MIPS_CONF7_WII)
 			cpu_wait = r4k_wait_irqoff;

@@ -40,6 +40,7 @@ do {									\
 	do {								\
 		TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir);		\
 		write_c0_xcontext((unsigned long) smp_processor_id() << 51); \
+		back_to_back_c0_hazard();                               \
 	} while (0)
 
 #else /* CONFIG_MIPS_PGD_C0_CONTEXT: using  pgd_current*/

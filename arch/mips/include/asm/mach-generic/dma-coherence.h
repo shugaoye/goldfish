@@ -14,19 +14,19 @@ struct device;
 static inline dma_addr_t plat_map_dma_mem(struct device *dev, void *addr,
 	size_t size)
 {
-	return virt_to_phys(addr);
+	return virt_to_bus(addr);
 }
 
 static inline dma_addr_t plat_map_dma_mem_page(struct device *dev,
 	struct page *page)
 {
-	return page_to_phys(page);
+	return phys_to_bus(page_to_phys(page));
 }
 
 static inline unsigned long plat_dma_addr_to_phys(struct device *dev,
 	dma_addr_t dma_addr)
 {
-	return dma_addr;
+	return bus_to_phys(dma_addr);
 }
 
 static inline void plat_unmap_dma_mem(struct device *dev, dma_addr_t dma_addr,
@@ -62,7 +62,7 @@ static inline int plat_device_is_coherent(struct device *dev)
 #ifdef CONFIG_DMA_COHERENT
 	return 1;
 #else
-	return coherentio;
+	return (coherentio > 0);
 #endif
 }
 

@@ -35,19 +35,36 @@ static inline unsigned long __xchg_u32(volatile int * m, unsigned int val)
 		: "memory");
 	} else if (kernel_uses_llsc) {
 		unsigned long dummy;
+#ifdef CONFIG_CPU_MIPSR6
+		register unsigned long tmp;
+#endif
 
 		do {
 			__asm__ __volatile__(
+#ifdef CONFIG_CPU_MIPSR6
+			"       .set    mips64r6                        \n"
+			"       dla     %2, %3                          \n"
+			"       ll      %0, 0(%2)       # xchg_u32      \n"
+			"	.set	mips0				\n"
+			"       move    %1, %z4                         \n"
+			"       .set    mips64r6                        \n"
+			"       sc      %1, 0(%2)                       \n"
+			"	.set	mips0				\n"
+			: "=&r" (retval), "=&r" (dummy), "=&r" (tmp),
+			  "+m" (*m)
+			: "Jr" (val));
+#else
 			"	.set	mips3				\n"
-			"	ll	%0, %3		# xchg_u32	\n"
+			"       ll      %0, %3          # xchg_u32      \n"
 			"	.set	mips0				\n"
 			"	move	%2, %z4				\n"
 			"	.set	mips3				\n"
-			"	sc	%2, %1				\n"
+			"       sc      %2, %1                          \n"
 			"	.set	mips0				\n"
 			: "=&r" (retval), "=m" (*m), "=&r" (dummy)
 			: "R" (*m), "Jr" (val)
 			: "memory");
+#endif
 		} while (unlikely(!dummy));
 	} else {
 		unsigned long flags;
@@ -85,17 +102,32 @@ static inline __u64 __xchg_u64(volatile __u64 * m, __u64 val)
 		: "memory");
 	} else if (kernel_uses_llsc) {
 		unsigned long dummy;
+#ifdef CONFIG_CPU_MIPSR6
+		register unsigned long tmp;
+#endif
 
 		do {
 			__asm__ __volatile__(
+#ifdef CONFIG_CPU_MIPSR6
+			"       .set    mips64r6                        \n"
+			"       dla     %2, %3                          \n"
+			"       lld     %0, 0(%2)       # xchg_u64      \n"
+			"       move    %1, %z4                         \n"
+			"       scd     %1, 0(%2)                       \n"
+			"	.set	mips0				\n"
+			: "=&r" (retval), "=&r" (dummy), "=&r" (tmp),
+			  "+m" (*m)
+			: "Jr" (val));
+#else
 			"	.set	mips3				\n"
-			"	lld	%0, %3		# xchg_u64	\n"
+			"       lld     %0, %3          # xchg_u64      \n"
 			"	move	%2, %z4				\n"
 			"	scd	%2, %1				\n"
 			"	.set	mips0				\n"
 			: "=&r" (retval), "=m" (*m), "=&r" (dummy)
 			: "R" (*m), "Jr" (val)
 			: "memory");
+#endif
 		} while (unlikely(!dummy));
 	} else {
 		unsigned long flags;
@@ -137,6 +169,42 @@ static inline unsigned long __xchg(unsigned long x, volatile void * ptr, int siz
 
 #define __HAVE_ARCH_CMPXCHG 1
 
+#ifdef CONFIG_CPU_MIPSR6
+#define __cmpxchg_asm(ld, st, m, old, new)				\
+({									\
+	__typeof(*(m)) __ret;						\
+	register unsigned long tmp;                                     \
+									\
+	if (kernel_uses_llsc) {                                         \
+		__asm__ __volatile__(					\
+		"	.set	push				\n"	\
+		"	.set	noat				\n"	\
+		"       .set    mips64r6                        \n"     \
+		"1:     dla     %1, %2                          \n"     \
+			ld   "  %0, 0(%1)       # __cmpxchg_asm \n"     \
+		"	bne	%0, %z3, 2f			\n"	\
+		"       .set    mips0                           \n"     \
+		"	move	$1, %z4				\n"	\
+		"       .set    mips64r6                        \n"     \
+		"       " st "  $1, 0(%1)                       \n"     \
+		"	beqz	$1, 1b				\n"	\
+		"	.set	pop				\n"	\
+		"2:						\n"	\
+		: "=&r" (__ret), "=&r" (tmp), "+m" (*m)                 \
+		: "Jr" (old), "Jr" (new));                              \
+	} else {							\
+		unsigned long __flags;					\
+									\
+		raw_local_irq_save(__flags);				\
+		__ret = *m;						\
+		if (__ret == old)					\
+			*m = new;					\
+		raw_local_irq_restore(__flags);				\
+	}								\
+									\
+	__ret;								\
+})
+#else /* !CONFIG_CPU_MIPSR6 */
 #define __cmpxchg_asm(ld, st, m, old, new)				\
 ({									\
 	__typeof(*(m)) __ret;						\
@@ -146,12 +214,12 @@ static inline unsigned long __xchg(unsigned long x, volatile void * ptr, int siz
 		"	.set	push				\n"	\
 		"	.set	noat				\n"	\
 		"	.set	mips3				\n"	\
-		"1:	" ld "	%0, %2		# __cmpxchg_asm \n"	\
+		"1:     " ld "  %0, %2          # __cmpxchg_asm \n"     \
 		"	bne	%0, %z3, 2f			\n"	\
 		"	.set	mips0				\n"	\
 		"	move	$1, %z4				\n"	\
 		"	.set	mips3				\n"	\
-		"	" st "	$1, %1				\n"	\
+		"       " st "  $1, %1                          \n"     \
 		"	beqzl	$1, 1b				\n"	\
 		"2:						\n"	\
 		"	.set	pop				\n"	\
@@ -163,12 +231,12 @@ static inline unsigned long __xchg(unsigned long x, volatile void * ptr, int siz
 		"	.set	push				\n"	\
 		"	.set	noat				\n"	\
 		"	.set	mips3				\n"	\
-		"1:	" ld "	%0, %2		# __cmpxchg_asm \n"	\
+		"1:     " ld "  %0, %2          # __cmpxchg_asm \n"     \
 		"	bne	%0, %z3, 2f			\n"	\
 		"	.set	mips0				\n"	\
 		"	move	$1, %z4				\n"	\
 		"	.set	mips3				\n"	\
-		"	" st "	$1, %1				\n"	\
+		"       " st "  $1, %1                          \n"     \
 		"	beqz	$1, 1b				\n"	\
 		"	.set	pop				\n"	\
 		"2:						\n"	\
@@ -187,6 +255,7 @@ static inline unsigned long __xchg(unsigned long x, volatile void * ptr, int siz
 									\
 	__ret;								\
 })
+#endif /* CONFIG_CPU_MIPSR6 */
 
 /*
  * This function doesn't exist, so you'll get a linker error

@@ -9,6 +9,7 @@ platforms += cavium-octeon
 platforms += cobalt
 platforms += dec
 platforms += emma
+platforms += goldfish
 platforms += jazz
 platforms += jz4740
 platforms += lantiq

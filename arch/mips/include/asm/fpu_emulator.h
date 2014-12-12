@@ -52,7 +52,7 @@ do {									\
 #endif /* CONFIG_DEBUG_FS */
 
 extern int mips_dsemul(struct pt_regs *regs, mips_instruction ir,
-	unsigned long cpc);
+	unsigned long cpc, unsigned long bpc, unsigned long r31);
 extern int do_dsemulret(struct pt_regs *xcp);
 extern int fpu_emulator_cop1Handler(struct pt_regs *xcp,
 				    struct mips_fpu_struct *ctx, int has_fpu,
@@ -61,6 +61,13 @@ int process_fpemu_return(int sig, void __user *fault_addr);
 int mm_isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		     unsigned long *contpc);
 
+#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+extern int mipsr2_emulation;
+extern const unsigned int fpucondbit[];
+int mipsr2_decoder(struct pt_regs *regs, u32 instruction);
+#else
+#define mipsr2_emulation    0
+#endif
 /*
  * Instruction inserted following the badinst to further tag the sequence
  */

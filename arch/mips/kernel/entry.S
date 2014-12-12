@@ -196,17 +196,28 @@ syscall_exit_work:
 	jal	syscall_trace_leave
 	b	resume_userspace
 
-#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_MIPS_MT)
+#if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6) || defined(CONFIG_MIPS_MT)
 
 /*
  * MIPS32R2 Instruction Hazard Barrier - must be called
  *
  * For C code use the inline version named instruction_hazard().
  */
+#ifdef CONFIG_EVA
+	.align  8
+#endif
 LEAF(mips_ihb)
-	.set	mips32r2
+#ifdef CONFIG_CPU_MIPSR6
+	.set    mips64r6
+#else
+	.set    mips32r2
+#endif
 	jr.hb	ra
 	nop
+	.set    mips0
+#ifdef CONFIG_EVA
+	.align  8
+#endif
 	END(mips_ihb)
 
-#endif /* CONFIG_CPU_MIPSR2 or CONFIG_MIPS_MT */
+#endif /* CONFIG_CPU_MIPSR2 or CONFIG_CPU_MIPSR6 or CONFIG_MIPS_MT */

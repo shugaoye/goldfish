@@ -68,11 +68,17 @@ struct rt_sigframe {
 static int protected_save_fp_context(struct sigcontext __user *sc)
 {
 	int err;
+#ifndef CONFIG_EVA
+	int err2;
+
 	while (1) {
 		lock_fpu_owner();
-		own_fpu_inatomic(1);
-		err = save_fp_context(sc); /* this might fail */
+		err2 = own_fpu_inatomic(1);
+		if (!err2)
+			err = save_fp_context(sc); /* this might fail */
 		unlock_fpu_owner();
+		if (err2)
+			err = fpu_emulator_save_context(sc);
 		if (likely(!err))
 			break;
 		/* touch the sigcontext and try again */
@@ -82,17 +88,27 @@ static int protected_save_fp_context(struct sigcontext __user *sc)
 		if (err)
 			break;	/* really bad sigcontext */
 	}
+#else
+	lose_fpu(1);
+	err = save_fp_context(sc); /* this might fail */
+#endif  /* CONFIG_EVA */
 	return err;
 }
 
 static int protected_restore_fp_context(struct sigcontext __user *sc)
 {
 	int err, tmp __maybe_unused;
+#ifndef CONFIG_EVA
+	int err2;
+
 	while (1) {
 		lock_fpu_owner();
-		own_fpu_inatomic(0);
-		err = restore_fp_context(sc); /* this might fail */
+		err2 = own_fpu_inatomic(0);
+		if (!err2)
+			err = restore_fp_context(sc); /* this might fail */
 		unlock_fpu_owner();
+		if (err2)
+			err = fpu_emulator_restore_context(sc);
 		if (likely(!err))
 			break;
 		/* touch the sigcontext and try again */
@@ -102,6 +118,10 @@ static int protected_restore_fp_context(struct sigcontext __user *sc)
 		if (err)
 			break;	/* really bad sigcontext */
 	}
+#else
+	lose_fpu(0);
+	err = restore_fp_context(sc); /* this might fail */
+#endif  /* CONFIG_EVA */
 	return err;
 }
 
@@ -122,6 +142,7 @@ int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 #endif
 	err |= __put_user(regs->hi, &sc->sc_mdhi);
 	err |= __put_user(regs->lo, &sc->sc_mdlo);
+#ifndef CONFIG_CPU_MIPSR6
 	if (cpu_has_dsp) {
 		err |= __put_user(mfhi1(), &sc->sc_hi1);
 		err |= __put_user(mflo1(), &sc->sc_lo1);
@@ -131,6 +152,7 @@ int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		err |= __put_user(mflo3(), &sc->sc_lo3);
 		err |= __put_user(rddsp(DSP_MASK), &sc->sc_dsp);
 	}
+#endif
 
 	used_math = !!used_math();
 	err |= __put_user(used_math, &sc->sc_used_math);
@@ -179,7 +201,9 @@ check_and_restore_fp_context(struct sigcontext __user *sc)
 int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 {
 	unsigned int used_math;
+#ifndef CONFIG_CPU_MIPSR6
 	unsigned long treg;
+#endif
 	int err = 0;
 	int i;
 
@@ -193,6 +217,7 @@ int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 #endif
 	err |= __get_user(regs->hi, &sc->sc_mdhi);
 	err |= __get_user(regs->lo, &sc->sc_mdlo);
+#ifndef CONFIG_CPU_MIPSR6
 	if (cpu_has_dsp) {
 		err |= __get_user(treg, &sc->sc_hi1); mthi1(treg);
 		err |= __get_user(treg, &sc->sc_lo1); mtlo1(treg);
@@ -202,6 +227,7 @@ int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
 		err |= __get_user(treg, &sc->sc_lo3); mtlo3(treg);
 		err |= __get_user(treg, &sc->sc_dsp); wrdsp(treg, DSP_MASK);
 	}
+#endif
 
 	for (i = 1; i < 32; i++)
 		err |= __get_user(regs->regs[i], &sc->sc_regs[i]);
@@ -512,6 +538,10 @@ static void handle_signal(unsigned long sig, siginfo_t *info,
 		regs->regs[0] = 0;		/* Don't deal with this again.	*/
 	}
 
+	/* adjust emulation stack if signal happens during emulation */
+	if (current_thread_info()->vdso_page)
+		vdso_epc_adjust(regs);
+
 	if (sig_uses_siginfo(ka))
 		ret = abi->setup_rt_frame(vdso + abi->rt_signal_return_offset,
 					  ka, regs, sig, oldset, info);
@@ -584,6 +614,7 @@ asmlinkage void do_notify_resume(struct pt_regs *regs, void *unused,
 }
 
 #ifdef CONFIG_SMP
+#ifndef CONFIG_EVA
 static int smp_save_fp_context(struct sigcontext __user *sc)
 {
 	return raw_cpu_has_fpu
@@ -598,9 +629,11 @@ static int smp_restore_fp_context(struct sigcontext __user *sc)
 	       : fpu_emulator_restore_context(sc);
 }
 #endif
+#endif
 
 static int signal_setup(void)
 {
+#ifndef CONFIG_EVA
 #ifdef CONFIG_SMP
 	/* For now just do the cpu_has_fpu check when the functions are invoked */
 	save_fp_context = smp_save_fp_context;
@@ -613,7 +646,11 @@ static int signal_setup(void)
 		save_fp_context = fpu_emulator_save_context;
 		restore_fp_context = fpu_emulator_restore_context;
 	}
-#endif
+#endif /* CONFIG_SMP */
+#else
+	save_fp_context = fpu_emulator_save_context;
+	restore_fp_context = fpu_emulator_restore_context;
+#endif /* CONFIG_EVA */
 
 	return 0;
 }

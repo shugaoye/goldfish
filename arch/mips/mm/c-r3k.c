@@ -274,6 +274,13 @@ static void r3k_flush_data_cache_page(unsigned long addr)
 {
 }
 
+static void r3k_mips_flush_data_cache_range(struct vm_area_struct *vma,
+	unsigned long vaddr, struct page *page, unsigned long addr,
+	unsigned long size)
+{
+	r3k_flush_cache_page(vma, addr, page_to_pfn(page));
+}
+
 static void r3k_flush_cache_sigtramp(unsigned long addr)
 {
 	unsigned long flags;
@@ -322,7 +329,7 @@ void __cpuinit r3k_cache_init(void)
 	flush_cache_all = r3k_flush_cache_all;
 	__flush_cache_all = r3k___flush_cache_all;
 	flush_cache_mm = r3k_flush_cache_mm;
-	flush_cache_range = r3k_flush_cache_range;
+	mips_flush_data_cache_range = r3k_mips_flush_data_cache_range;
 	flush_cache_page = r3k_flush_cache_page;
 	flush_icache_range = r3k_flush_icache_range;
 	local_flush_icache_range = r3k_flush_icache_range;

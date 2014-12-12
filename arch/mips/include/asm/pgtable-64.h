@@ -283,21 +283,30 @@ extern void pmd_init(unsigned long page, unsigned long pagetable);
  * low 32 bits zero.
  */
 static inline pte_t mk_swap_pte(unsigned long type, unsigned long offset)
-{ pte_t pte; pte_val(pte) = (type << 32) | (offset << 40); return pte; }
+{
+	pte_t pte;
 
-#define __swp_type(x)		(((x).val >> 32) & 0xff)
-#define __swp_offset(x)		((x).val >> 40)
+	pte_val(pte) = (type << __SWP_PTE_SKIP_BITS_NUM) |
+		(offset << (__SWP_PTE_SKIP_BITS_NUM + __SWP_TYPE_BITS_NUM));
+	return pte;
+}
+
+#define __swp_type(x)           \
+		(((x).val >> __SWP_PTE_SKIP_BITS_NUM) & __SWP_TYPE_MASK)
+#define __swp_offset(x)         \
+		((x).val >> (__SWP_PTE_SKIP_BITS_NUM + __SWP_TYPE_BITS_NUM))
 #define __swp_entry(type, offset) ((swp_entry_t) { pte_val(mk_swap_pte((type), (offset))) })
 #define __pte_to_swp_entry(pte) ((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(x)	((pte_t) { (x).val })
 
 /*
- * Bits 0, 4, 6, and 7 are taken. Let's leave bits 1, 2, 3, and 5 alone to
- * make things easier, and only use the upper 56 bits for the page offset...
+ * Take out all bits from V to bit 0. We should actually take out only VGFP but
+ * today PTE is too complicated by HUGE page support etc
  */
-#define PTE_FILE_MAX_BITS	56
+#define PTE_FILE_MAX_BITS       (64 - _PAGE_DIRTY_SHIFT)
 
-#define pte_to_pgoff(_pte)	((_pte).pte >> 8)
-#define pgoff_to_pte(off)	((pte_t) { ((off) << 8) | _PAGE_FILE })
+#define pte_to_pgoff(_pte)      ((_pte).pte >> _PAGE_DIRTY_SHIFT)
+#define pgoff_to_pte(off)       \
+		((pte_t) { ((off) << _PAGE_DIRTY_SHIFT) | _PAGE_FILE })
 
 #endif /* _ASM_PGTABLE_64_H */

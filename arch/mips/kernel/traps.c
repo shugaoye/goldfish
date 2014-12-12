@@ -76,6 +76,7 @@ extern asmlinkage void handle_cpu(void);
 extern asmlinkage void handle_ov(void);
 extern asmlinkage void handle_tr(void);
 extern asmlinkage void handle_fpe(void);
+extern asmlinkage void handle_ftlb(void);
 extern asmlinkage void handle_mdmx(void);
 extern asmlinkage void handle_watch(void);
 extern asmlinkage void handle_mt(void);
@@ -328,6 +329,7 @@ void show_regs(struct pt_regs *regs)
 void show_registers(struct pt_regs *regs)
 {
 	const int field = 2 * sizeof(unsigned long);
+	mm_segment_t old_fs = get_fs();
 
 	__show_regs(regs);
 	print_modules();
@@ -342,9 +344,12 @@ void show_registers(struct pt_regs *regs)
 			printk("*HwTLS: %0*lx\n", field, tls);
 	}
 
+	if (!user_mode(regs))
+		set_fs(KERNEL_DS);
 	show_stacktrace(current, regs);
 	show_code((unsigned int __user *) regs->cp0_epc);
 	printk("\n");
+	set_fs(old_fs);
 }
 
 static int regs_to_trapnr(struct pt_regs *regs)
@@ -772,7 +777,7 @@ asmlinkage void do_fpe(struct pt_regs *regs, unsigned long fcr31)
 	force_sig_info(SIGFPE, &info, current);
 }
 
-static void do_trap_or_bp(struct pt_regs *regs, unsigned int code,
+void do_trap_or_bp(struct pt_regs *regs, unsigned int code,
 	const char *str)
 {
 	siginfo_t info;
@@ -837,6 +842,13 @@ asmlinkage void do_bp(struct pt_regs *regs)
 	unsigned int opcode, bcode;
 	unsigned long epc;
 	u16 instr[2];
+#ifdef CONFIG_EVA
+	mm_segment_t seg;
+
+	seg = get_fs();
+	if (!user_mode(regs))
+		set_fs(KERNEL_DS);
+#endif
 
 	if (get_isa16_mode(regs->cp0_epc)) {
 		/* Calculate EPC. */
@@ -852,6 +864,9 @@ asmlinkage void do_bp(struct pt_regs *regs)
 				goto out_sigsegv;
 		    bcode = (instr[0] >> 6) & 0x3f;
 		    do_trap_or_bp(regs, bcode, "Break");
+#ifdef CONFIG_EVA
+		    set_fs(seg);
+#endif
 		    return;
 		}
 	} else {
@@ -875,23 +890,35 @@ asmlinkage void do_bp(struct pt_regs *regs)
 	 */
 	switch (bcode) {
 	case BRK_KPROBE_BP:
-		if (notify_die(DIE_BREAK, "debug", regs, bcode, regs_to_trapnr(regs), SIGTRAP) == NOTIFY_STOP)
+		if (notify_die(DIE_BREAK, "debug", regs, bcode, regs_to_trapnr(regs), SIGTRAP) == NOTIFY_STOP) {
+#ifdef CONFIG_EVA
+			set_fs(seg);
+#endif
 			return;
-		else
+		} else
 			break;
 	case BRK_KPROBE_SSTEPBP:
-		if (notify_die(DIE_SSTEPBP, "single_step", regs, bcode, regs_to_trapnr(regs), SIGTRAP) == NOTIFY_STOP)
+		if (notify_die(DIE_SSTEPBP, "single_step", regs, bcode, regs_to_trapnr(regs), SIGTRAP) == NOTIFY_STOP) {
+#ifdef CONFIG_EVA
+			set_fs(seg);
+#endif
 			return;
-		else
+		} else
 			break;
 	default:
 		break;
 	}
 
 	do_trap_or_bp(regs, bcode, "Break");
+#ifdef CONFIG_EVA
+	set_fs(seg);
+#endif
 	return;
 
 out_sigsegv:
+#ifdef CONFIG_EVA
+	set_fs(seg);
+#endif
 	force_sig(SIGSEGV, current);
 }
 
@@ -900,6 +927,13 @@ asmlinkage void do_tr(struct pt_regs *regs)
 	u32 opcode, tcode = 0;
 	u16 instr[2];
 	unsigned long epc = msk_isa16_mode(exception_epc(regs));
+#ifdef CONFIG_EVA
+	mm_segment_t seg;
+
+	seg = get_fs();
+	if (!user_mode(regs))
+		set_fs(KERNEL_DS);
+#endif
 
 	if (get_isa16_mode(regs->cp0_epc)) {
 		if (__get_user(instr[0], (u16 __user *)(epc + 0)) ||
@@ -931,6 +965,30 @@ asmlinkage void do_ri(struct pt_regs *regs)
 	unsigned long old31 = regs->regs[31];
 	unsigned int opcode = 0;
 	int status = -1;
+
+#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+	if (mipsr2_emulation && likely(user_mode(regs))) {
+		if (likely(get_user(opcode, epc) >= 0)) {
+			status = mipsr2_decoder(regs, opcode);
+			switch (status) {
+			case SIGEMT:
+			case 0:
+				if (test_thread_flag(TIF_32BIT_ADDR) &&
+				    !test_thread_flag(TIF_32BIT_REGS))
+					set_thread_flag(TIF_32BIT_REGS);
+				return;
+			case SIGILL:
+				break;
+			default:
+				if (test_thread_flag(TIF_32BIT_ADDR) &&
+				    !test_thread_flag(TIF_32BIT_REGS))
+					set_thread_flag(TIF_32BIT_REGS);
+				process_fpemu_return(status, (void __user *)current->thread.cp0_baduaddr);
+				return;
+			}
+		}
+	}
+#endif
 
 	if (notify_die(DIE_RI, "RI Fault", regs, 0, regs_to_trapnr(regs), SIGILL)
 	    == NOTIFY_STOP)
@@ -1114,20 +1172,30 @@ asmlinkage void do_cpu(struct pt_regs *regs)
 		/* Fall through.  */
 
 	case 1:
-		if (used_math())	/* Using the FPU again.	 */
-			own_fpu(1);
-		else {			/* First time FPU user.	 */
-			init_fpu();
+		status = 0;
+		if (used_math())	/* Using the FPU again.  */
+			status = own_fpu(1);
+		else {			/* First time FPU user.  */
+			status = init_fpu();
+#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+			if (status && !mipsr2_emulation) {
+#else
+			if (status) {
+#endif
+				force_sig(SIGFPE, current);
+				return;
+			}
+
 			set_used_math();
 		}
 
-		if (!raw_cpu_has_fpu) {
+		if ((!raw_cpu_has_fpu) || status) {
 			int sig;
 			void __user *fault_addr = NULL;
 			sig = fpu_emulator_cop1Handler(regs,
 						       &current->thread.fpu,
 						       0, &fault_addr);
-			if (!process_fpemu_return(sig, fault_addr))
+			if ((!process_fpemu_return(sig, fault_addr)) && !status)
 				mt_ase_fp_affinity();
 		}
 
@@ -1176,14 +1244,34 @@ asmlinkage void do_watch(struct pt_regs *regs)
 	}
 }
 
+#ifdef CONFIG_CPU_MIPSR6
+char *mcheck_code[32] = { "non R6 multiple hit in TLB: Status.TS = 1",
+			  "multiple hit in TLB",
+			  "multiple hit in TLB, speculative access",
+			  "page size mismatch, unsupported FTLB page mask",
+			  "index doesn't match EntryHI.VPN2 position in FTLB",
+			  "HW PageTableWalker: Valid bits mismatch in PTE pair on directory level",
+			  "HW PageTableWalker: Dual page mode is not implemented"
+			};
+#endif
+
 asmlinkage void do_mcheck(struct pt_regs *regs)
 {
 	const int field = 2 * sizeof(unsigned long);
 	int multi_match = regs->cp0_status & ST0_TS;
+#ifdef CONFIG_CPU_MIPSR6
+	int code = 0;
+#endif
 
 	show_regs(regs);
 
+#ifdef CONFIG_CPU_MIPSR6
+	if (multi_match || (code = read_c0_pagegrain() & PG_MCCAUSE)) {
+		printk("PageGrain: %0x\n", read_c0_pagegrain());
+		printk("BadVAddr: %0*lx\n", field, read_c0_badvaddr());
+#else
 	if (multi_match) {
+#endif
 		printk("Index	: %0x\n", read_c0_index());
 		printk("Pagemask: %0x\n", read_c0_pagemask());
 		printk("EntryHi : %0*lx\n", field, read_c0_entryhi());
@@ -1195,6 +1283,9 @@ asmlinkage void do_mcheck(struct pt_regs *regs)
 
 	show_code((unsigned int __user *) regs->cp0_epc);
 
+#ifdef CONFIG_CPU_MIPSR6
+	panic("Caught Machine Check exception - %s",mcheck_code[code]);
+#else
 	/*
 	 * Some chips may have other causes of machine check (e.g. SB1
 	 * graduation timer)
@@ -1202,6 +1293,7 @@ asmlinkage void do_mcheck(struct pt_regs *regs)
 	panic("Caught Machine Check exception - %scaused by multiple "
 	      "matching entries in the TLB.",
 	      (multi_match) ? "" : "not ");
+#endif
 }
 
 asmlinkage void do_mt(struct pt_regs *regs)
@@ -1286,6 +1378,8 @@ static inline void parity_protection_init(void)
 	case CPU_34K:
 	case CPU_74K:
 	case CPU_1004K:
+	case CPU_PROAPTIV:
+	case CPU_INTERAPTIV:
 		{
 #define ERRCTL_PE	0x80000000
 #define ERRCTL_L2P	0x00800000
@@ -1367,22 +1461,26 @@ asmlinkage void cache_parity_error(void)
 	unsigned int reg_val;
 
 	/* For the moment, report the problem and hang. */
-	printk("Cache error exception:\n");
+	printk("Cache error exception, cp0_ecc=0x%08x:\n",read_c0_ecc());
 	printk("cp0_errorepc == %0*lx\n", field, read_c0_errorepc());
 	reg_val = read_c0_cacheerr();
 	printk("c0_cacheerr == %08x\n", reg_val);
 
-	printk("Decoded c0_cacheerr: %s cache fault in %s reference.\n",
-	       reg_val & (1<<30) ? "secondary" : "primary",
-	       reg_val & (1<<31) ? "data" : "insn");
-	printk("Error bits: %s%s%s%s%s%s%s\n",
+	if ((reg_val & 0xc0000000) == 0xc0000000)
+		printk("Decoded c0_cacheerr: FTLB parity error\n");
+	else
+		printk("Decoded c0_cacheerr: %s cache fault in %s reference.\n",
+			reg_val & (1<<30) ? "secondary" : "primary",
+			reg_val & (1<<31) ? "data" : "insn");
+	printk("Error bits: %s%s%s%s%s%s%s%s\n",
 	       reg_val & (1<<29) ? "ED " : "",
 	       reg_val & (1<<28) ? "ET " : "",
+	       reg_val & (1<<27) ? "ES " : "",
 	       reg_val & (1<<26) ? "EE " : "",
 	       reg_val & (1<<25) ? "EB " : "",
-	       reg_val & (1<<24) ? "EI " : "",
-	       reg_val & (1<<23) ? "E1 " : "",
-	       reg_val & (1<<22) ? "E0 " : "");
+	       reg_val & (1<<24) ? "EI/EF " : "",
+	       reg_val & (1<<23) ? "E1/SP " : "",
+	       reg_val & (1<<22) ? "E0/EW " : "");
 	printk("IDX: 0x%08x\n", reg_val & ((1<<22)-1));
 
 #if defined(CONFIG_CPU_MIPS32) || defined(CONFIG_CPU_MIPS64)
@@ -1394,6 +1492,45 @@ asmlinkage void cache_parity_error(void)
 #endif
 
 	panic("Can't handle the cache error!");
+}
+
+asmlinkage void do_ftlb(void)
+{
+	const int field = 2 * sizeof(unsigned long);
+	unsigned int reg_val;
+
+	/* For the moment, report the problem and hang. */
+	printk("FTLB error exception, cp0_ecc=0x%08x:\n",read_c0_ecc());
+	printk("cp0_errorepc == %0*lx\n", field, read_c0_errorepc());
+	reg_val = read_c0_cacheerr();
+	printk("c0_cacheerr == %08x\n", reg_val);
+
+	if ((reg_val & 0xc0000000) == 0xc0000000)
+		printk("Decoded c0_cacheerr: FTLB parity error\n");
+	else
+		printk("Decoded c0_cacheerr: %s cache fault in %s reference.\n",
+		       reg_val & (1<<30) ? "secondary" : "primary",
+		       reg_val & (1<<31) ? "data" : "insn");
+	printk("Error bits: %s%s%s%s%s%s%s%s\n",
+	       reg_val & (1<<29) ? "ED " : "",
+	       reg_val & (1<<28) ? "ET " : "",
+	       reg_val & (1<<27) ? "ES " : "",
+	       reg_val & (1<<26) ? "EE " : "",
+	       reg_val & (1<<25) ? "EB " : "",
+	       reg_val & (1<<24) ? "EI/EF " : "",
+	       reg_val & (1<<23) ? "E1/SP " : "",
+	       reg_val & (1<<22) ? "E0/EW " : "");
+	printk("IDX: 0x%08x\n", reg_val & ((1<<22)-1));
+
+#if defined(CONFIG_CPU_MIPS32) || defined(CONFIG_CPU_MIPS64)
+	if (reg_val & (1<<22))
+		printk("DErrAddr0: 0x%0*lx\n", field, read_c0_derraddr0());
+
+	if (reg_val & (1<<23))
+		printk("DErrAddr1: 0x%0*lx\n", field, read_c0_derraddr1());
+#endif
+
+	panic("Can't handle the FTLB parity error!");
 }
 
 /*
@@ -1447,10 +1584,16 @@ int register_nmi_notifier(struct notifier_block *nb)
 
 void __noreturn nmi_exception_handler(struct pt_regs *regs)
 {
+	unsigned long epc;
+	char str[100];
+
 	raw_notifier_call_chain(&nmi_chain, 0, regs);
 	bust_spinlocks(1);
-	printk("NMI taken!!!!\n");
-	die("NMI", regs);
+	epc = regs->cp0_epc;
+	snprintf(str, 100, "CPU%d NMI taken, CP0_EPC=%lx (before replacement by CP0_ERROREPC)\n",smp_processor_id(),regs->cp0_epc);
+	regs->cp0_epc = read_c0_errorepc();
+	die(str, regs);
+	regs->cp0_epc = epc;
 }
 
 #define VECTORSPACING 0x100	/* for EI/VI mode */
@@ -1513,7 +1656,6 @@ static void *set_vi_srs_handler(int n, vi_handler_t addr, int srs)
 	unsigned char *b;
 
 	BUG_ON(!cpu_has_veic && !cpu_has_vint);
-	BUG_ON((n < 0) && (n > 9));
 
 	if (addr == NULL) {
 		handler = (unsigned long) do_default_vi;
@@ -1687,10 +1829,10 @@ void __cpuinit per_cpu_trap_init(bool is_boot_cpu)
 	if (cpu_has_dsp)
 		status_set |= ST0_MX;
 
-	change_c0_status(ST0_CU|ST0_MX|ST0_RE|ST0_FR|ST0_BEV|ST0_TS|ST0_KX|ST0_SX|ST0_UX,
+	change_c0_status(ST0_CU|ST0_MX|ST0_RE|ST0_BEV|ST0_TS|ST0_KX|ST0_SX|ST0_UX,
 			 status_set);
 
-	if (cpu_has_mips_r2)
+	if (cpu_has_mips_r2 || cpu_has_mips_r6)
 		hwrena |= 0x0000000f;
 
 	if (!noulri && cpu_has_userlocal)
@@ -1705,6 +1847,10 @@ void __cpuinit per_cpu_trap_init(bool is_boot_cpu)
 
 	if (cpu_has_veic || cpu_has_vint) {
 		unsigned long sr = set_c0_status(ST0_BEV);
+#ifdef CONFIG_EVA
+		write_c0_ebase(ebase|MIPS_EBASE_WG);
+		back_to_back_c0_hazard();
+#endif
 		write_c0_ebase(ebase);
 		write_c0_status(sr);
 		/* Setting vector spacing enables EI/VI mode  */
@@ -1725,7 +1871,7 @@ void __cpuinit per_cpu_trap_init(bool is_boot_cpu)
 	 *  o read IntCtl.IPTI to determine the timer interrupt
 	 *  o read IntCtl.IPPCI to determine the performance counter interrupt
 	 */
-	if (cpu_has_mips_r2) {
+	if (cpu_has_mips_r2 || cpu_has_mips_r6) {
 		cp0_compare_irq_shift = CAUSEB_TI - CAUSEB_IP;
 		cp0_compare_irq = (read_c0_intctl() >> INTCTLB_IPTI) & 7;
 		cp0_perfcount_irq = (read_c0_intctl() >> INTCTLB_IPPCI) & 7;
@@ -1770,7 +1916,7 @@ void __cpuinit per_cpu_trap_init(bool is_boot_cpu)
 }
 
 /* Install CPU exception handler */
-void __cpuinit set_handler(unsigned long offset, void *addr, unsigned long size)
+void set_handler(unsigned long offset, void *addr, unsigned long size)
 {
 #ifdef CONFIG_CPU_MICROMIPS
 	memcpy((void *)(ebase + offset), ((unsigned char *)addr - 1), size);
@@ -1808,6 +1954,8 @@ static int __init set_rdhwr_noopt(char *str)
 
 __setup("rdhwr_noopt", set_rdhwr_noopt);
 
+extern void tlb_do_page_fault_0(void);
+
 void __init trap_init(void)
 {
 	extern char except_vec3_generic;
@@ -1829,11 +1977,11 @@ void __init trap_init(void)
 	} else {
 #ifdef CONFIG_KVM_GUEST
 #define KVM_GUEST_KSEG0     0x40000000
-        ebase = KVM_GUEST_KSEG0;
+		ebase = KVM_GUEST_KSEG0;
 #else
-        ebase = CKSEG0;
+		ebase = CKSEG0;
 #endif
-		if (cpu_has_mips_r2)
+		if (cpu_has_mips_r2 || cpu_has_mips_r6)
 			ebase += (read_c0_ebase() & 0x3ffff000);
 	}
 
@@ -1933,6 +2081,13 @@ void __init trap_init(void)
 
 	if (cpu_has_fpu && !cpu_has_nofpuex)
 		set_except_vector(15, handle_fpe);
+
+	set_except_vector(16, handle_ftlb);
+
+	if (cpu_has_rixi && cpu_has_rixi_except) {
+		set_except_vector(19, tlb_do_page_fault_0);
+		set_except_vector(20, tlb_do_page_fault_0);
+	}
 
 	set_except_vector(22, handle_mdmx);
 

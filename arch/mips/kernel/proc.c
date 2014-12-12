@@ -35,9 +35,19 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	 */
 	if (n == 0) {
 		seq_printf(m, "system type\t\t: %s\n", get_system_type());
+#ifndef CONFIG_GOLDFISH
 		if (mips_get_machine_name())
 			seq_printf(m, "machine\t\t\t: %s\n",
 				   mips_get_machine_name());
+#else
+       /*
+        * This is needed by the Android init process to run
+        * target specific startup code
+        */
+		seq_printf(m, "Hardware\t\t: %s\n", mips_get_machine_name());
+		seq_printf(m, "Revison\t\t\t: %d\n", 1);
+#endif
+
 	}
 
 	seq_printf(m, "processor\t\t: %ld\n", n);
@@ -81,10 +91,14 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 			seq_printf(m, "%s", " mips32r1");
 		if (cpu_has_mips32r2)
 			seq_printf(m, "%s", " mips32r2");
+		if (cpu_has_mips32r6)
+			seq_printf(m, "%s", " mips32r6");
 		if (cpu_has_mips64r1)
 			seq_printf(m, "%s", " mips64r1");
 		if (cpu_has_mips64r2)
 			seq_printf(m, "%s", " mips64r2");
+		if (cpu_has_mips64r6)
+			seq_printf(m, "%s", " mips64r6");
 		seq_printf(m, "\n");
 	}
 
@@ -98,22 +112,51 @@ static int show_cpuinfo(struct seq_file *m, void *v)
 	if (cpu_has_mipsmt)	seq_printf(m, "%s", " mt");
 	if (cpu_has_mmips)	seq_printf(m, "%s", " micromips");
 	if (cpu_has_vz)		seq_printf(m, "%s", " vz");
+	if (cpu_has_eva)	seq_printf(m, "%s", " eva");
 	seq_printf(m, "\n");
 
-	if (cpu_has_mmips) {
-		seq_printf(m, "micromips kernel\t: %s\n",
-		      (read_c0_config3() & MIPS_CONF3_ISA_OE) ?  "yes" : "no");
-	}
+
 	seq_printf(m, "shadow register sets\t: %d\n",
 		      cpu_data[n].srsets);
 	seq_printf(m, "kscratch registers\t: %d\n",
 		      hweight8(cpu_data[n].kscratch_mask));
 	seq_printf(m, "core\t\t\t: %d\n", cpu_data[n].core);
+#if defined(CONFIG_MIPS_MT_SMP) || defined(CONFIG_MIPS_MT_SMTC)
+	if (cpu_has_mipsmt) {
+		seq_printf(m, "VPE\t\t\t: %d\n", cpu_data[n].vpe_id);
+#if defined(CONFIG_MIPS_MT_SMTC)
+		seq_printf(m, "TC\t\t\t: %d\n", cpu_data[n].tc_id);
+#endif
+	}
+#endif
 
 	sprintf(fmt, "VCE%%c exceptions\t\t: %s\n",
 		      cpu_has_vce ? "%u" : "not available");
 	seq_printf(m, fmt, 'D', vced_count);
 	seq_printf(m, fmt, 'I', vcei_count);
+
+	seq_printf(m, "kernel modes\t\t:");
+#ifdef CONFIG_64BIT
+	seq_printf(m, " 64bit");
+#else
+	seq_printf(m, " 32bit");
+#endif
+#ifdef CONFIG_64BIT_PHYS_ADDR
+	seq_printf(m, " 64bit-address");
+#endif
+#ifdef CONFIG_EVA
+	seq_printf(m, " eva");
+#endif
+#ifdef CONFIG_HIGHMEM
+	seq_printf(m, " highmem");
+#endif
+	if (cpu_has_mmips && (read_c0_config3() & MIPS_CONF3_ISA_OE))
+		seq_printf(m, " micromips");
+#ifdef CONFIG_SMP
+	seq_printf(m, " smp");
+#endif
+	seq_printf(m, "\n");
+
 	seq_printf(m, "\n");
 
 	return 0;

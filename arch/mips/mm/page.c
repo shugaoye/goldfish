@@ -99,7 +99,11 @@ pg_addiu(u32 **buf, unsigned int reg1, unsigned int reg2, unsigned int off)
 			uasm_i_addiu(buf, T9, ZERO, off);
 		uasm_i_daddu(buf, reg1, reg2, T9);
 	} else {
+#ifdef CONFIG_CPU_MIPSR6
+		if (off > 0xff) {
+#else
 		if (off > 0x7fff) {
+#endif
 			uasm_i_lui(buf, T9, uasm_rel_hi(off));
 			uasm_i_addiu(buf, T9, T9, uasm_rel_lo(off));
 			UASM_i_ADDU(buf, reg1, reg2, T9);
