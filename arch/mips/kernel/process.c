@@ -82,6 +82,23 @@ void flush_thread(void)
 {
 }
 
+int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
+{
+	preempt_disable();
+
+	if (is_fpu_owner())
+		save_fp(current);
+
+	if (cpu_has_dsp)
+		save_dsp(current);
+
+	*dst = *src;
+
+	preempt_enable();
+
+	return 0;
+}
+
 int copy_thread(unsigned long clone_flags, unsigned long usp,
 	unsigned long arg, struct task_struct *p)
 {
@@ -91,16 +108,6 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	p->set_child_tid = p->clear_child_tid = NULL;
 
 	childksp = (unsigned long)task_stack_page(p) + THREAD_SIZE - 32;
-
-	preempt_disable();
-
-	if (is_fpu_owner())
-		save_fp(p);
-
-	if (cpu_has_dsp)
-		save_dsp(p);
-
-	preempt_enable();
 
 	ti->vdso_page = NULL;
 	mips_thread_vdso(ti);
