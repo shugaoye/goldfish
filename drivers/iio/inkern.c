@@ -426,6 +426,9 @@ static int iio_channel_read(struct iio_channel *chan, int *val, int *val2,
 	if (val2 == NULL)
 		val2 = &unused;
 
+	if(!iio_channel_has_info(chan->channel, info))
+		return -EINVAL;
+
 	if (chan->indio_dev->info->read_raw_multi) {
 		ret = chan->indio_dev->info->read_raw_multi(chan->indio_dev,
 					chan->channel, INDIO_MAX_RAW_ELEMENTS,
@@ -608,3 +611,28 @@ err_unlock:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(iio_get_channel_type);
+
+static int iio_channel_write(struct iio_channel *chan, int val, int val2,
+			     enum iio_chan_info_enum info)
+{
+	return chan->indio_dev->info->write_raw(chan->indio_dev,
+						chan->channel, val, val2, info);
+}
+
+int iio_write_channel_raw(struct iio_channel *chan, int val)
+{
+	int ret;
+
+	mutex_lock(&chan->indio_dev->info_exist_lock);
+	if (chan->indio_dev->info == NULL) {
+		ret = -ENODEV;
+		goto err_unlock;
+	}
+
+	ret = iio_channel_write(chan, val, 0, IIO_CHAN_INFO_RAW);
+err_unlock:
+	mutex_unlock(&chan->indio_dev->info_exist_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(iio_write_channel_raw);
