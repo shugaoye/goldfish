@@ -23,6 +23,7 @@
 #include <linux/slab.h>
 #include <linux/irq.h>
 #include <linux/io.h>
+#include <linux/acpi.h>
 
 enum {
 	REG_READ        = 0x00,
@@ -185,12 +186,19 @@ static const struct of_device_id goldfish_events_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, goldfish_events_of_match);
 
+static const struct acpi_device_id goldfish_events_acpi_match[] = {
+	{ "GFSH0002", 0 },
+	{ },
+};
+MODULE_DEVICE_TABLE(acpi, goldfish_events_acpi_match);
+
 static struct platform_driver events_driver = {
 	.probe	= events_probe,
 	.driver	= {
 		.owner	= THIS_MODULE,
 		.name	= "goldfish_events",
 		.of_match_table = goldfish_events_of_match,
+		.acpi_match_table = ACPI_PTR(goldfish_events_acpi_match),
 	},
 };
 
