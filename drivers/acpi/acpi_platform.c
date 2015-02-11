@@ -49,6 +49,7 @@ static const struct acpi_device_id acpi_platform_device_ids[] = {
 	 */
 	{ "GFSH0001" },  /* goldfish battery */
 	{ "GFSH0002" },  /* goldfish events */
+	{ "GFSH0003" },  /* android pipe */
 
 	{ }
 };
