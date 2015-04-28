@@ -108,12 +108,11 @@ static void gic_eic_irq_dispatch(void)
 		spurious_interrupt();
 }
 
-static void __init vpe_local_setup(unsigned int numvpes)
+static void __init vpe_local_setup(void)
 {
 	unsigned long timer_intr = GIC_INT_TMR;
 	unsigned long perf_intr = GIC_INT_PERFCTR;
 	unsigned int vpe_ctl;
-	int i;
 
 	if (cpu_has_veic) {
 		/*
@@ -130,37 +129,33 @@ static void __init vpe_local_setup(unsigned int numvpes)
 
 	/*
 	 * Setup the default performance counter timer interrupts
-	 * for all VPEs
 	 */
-	for (i = 0; i < numvpes; i++) {
-		GICWRITE(GIC_REG(VPE_LOCAL, GIC_VPE_OTHER_ADDR), i);
 
-		/* Are Interrupts locally routable? */
-		GICREAD(GIC_REG(VPE_OTHER, GIC_VPE_CTL), vpe_ctl);
-		if (vpe_ctl & GIC_VPE_CTL_TIMER_RTBL_MSK) {
-			if (cp0_compare_irq >= 2)
-				timer_intr = cp0_compare_irq - 2;
-			GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_TIMER_MAP),
-				 GIC_MAP_TO_PIN_MSK | timer_intr);
-			mips_smp_c0_status_mask |= (0x400 << timer_intr);
-		}
-		if (cpu_has_veic) {
-			set_vi_handler(timer_intr + GIC_PIN_TO_VEC_OFFSET,
-				gic_eic_irq_dispatch);
-			gic_shared_intr_map[timer_intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_TIMER_MSK;
-		}
+	/* Are Interrupts locally routable? */
+	GICREAD(GIC_REG(VPE_LOCAL, GIC_VPE_CTL), vpe_ctl);
+	if (vpe_ctl & GIC_VPE_CTL_TIMER_RTBL_MSK) {
+		if (cp0_compare_irq >= 2)
+			timer_intr = cp0_compare_irq - 2;
+		GICWRITE(GIC_REG(VPE_LOCAL, GIC_VPE_TIMER_MAP),
+			 GIC_MAP_TO_PIN_MSK | timer_intr);
+		mips_smp_c0_status_mask |= (0x400 << timer_intr);
+	}
+	if (cpu_has_veic) {
+		set_vi_handler(timer_intr + GIC_PIN_TO_VEC_OFFSET,
+			gic_eic_irq_dispatch);
+		gic_shared_intr_map[timer_intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_TIMER_MSK;
+	}
 
-		if (vpe_ctl & GIC_VPE_CTL_PERFCNT_RTBL_MSK) {
-			if (cp0_perfcount_irq >= 2)
-				perf_intr = cp0_perfcount_irq - 2;
-			GICWRITE(GIC_REG(VPE_OTHER, GIC_VPE_PERFCTR_MAP),
-				 GIC_MAP_TO_PIN_MSK | perf_intr);
-			mips_smp_c0_status_mask |= (0x400 << perf_intr);
-		}
-		if (cpu_has_veic) {
-			set_vi_handler(perf_intr + GIC_PIN_TO_VEC_OFFSET, gic_eic_irq_dispatch);
-			gic_shared_intr_map[perf_intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_PERFCNT_MSK;
-		}
+	if (vpe_ctl & GIC_VPE_CTL_PERFCNT_RTBL_MSK) {
+		if (cp0_perfcount_irq >= 2)
+			perf_intr = cp0_perfcount_irq - 2;
+		GICWRITE(GIC_REG(VPE_LOCAL, GIC_VPE_PERFCTR_MAP),
+			 GIC_MAP_TO_PIN_MSK | perf_intr);
+		mips_smp_c0_status_mask |= (0x400 << perf_intr);
+	}
+	if (cpu_has_veic) {
+		set_vi_handler(perf_intr + GIC_PIN_TO_VEC_OFFSET, gic_eic_irq_dispatch);
+		gic_shared_intr_map[perf_intr + GIC_PIN_TO_VEC_OFFSET].local_intr_mask |= GIC_VPE_RMASK_PERFCNT_MSK;
 	}
 }
 
@@ -214,8 +209,9 @@ static void gic_unmask_irq(struct irq_data *d)
 	GIC_SET_INTR_MASK(d->irq - gic_irq_base);
 }
 
-#ifdef CONFIG_SMP
 static DEFINE_SPINLOCK(gic_lock);
+
+#ifdef CONFIG_SMP
 
 static int gic_set_affinity(struct irq_data *d, const struct cpumask *cpumask,
 			    bool force)
@@ -259,11 +255,13 @@ static struct irq_chip gic_irq_controller = {
 #endif
 };
 
-static void __init gic_setup_intr(unsigned int intr, unsigned int cpu,
+static void __init gic_setup_intr(unsigned int intr,
 	unsigned int pin, unsigned int polarity, unsigned int trigtype,
 	unsigned int flags)
 {
 	struct gic_shared_intr_map *map_ptr;
+	unsigned int gic_vpe;
+	unsigned int cpu;
 
 	/* Setup Intr to Pin mapping */
 	if (pin & GIC_MAP_TO_NMI_MSK) {
@@ -278,7 +276,8 @@ static void __init gic_setup_intr(unsigned int intr, unsigned int cpu,
 		GICWRITE(GIC_REG_ADDR(SHARED, GIC_SH_MAP_TO_PIN(intr)),
 			 GIC_MAP_TO_PIN_MSK | pin);
 		/* Setup Intr to CPU mapping */
-		GIC_SH_MAP_TO_VPE_SMASK(intr, cpu);
+		gic_vpe = GIC_ID(smp_processor_id());
+		GIC_SH_MAP_TO_VPE_SMASK(intr, gic_vpe);
 		if (cpu_has_veic) {
 			set_vi_handler(pin + GIC_PIN_TO_VEC_OFFSET,
 				gic_eic_irq_dispatch);
@@ -299,22 +298,58 @@ static void __init gic_setup_intr(unsigned int intr, unsigned int cpu,
 	GIC_CLR_INTR_MASK(intr);
 	/* Initialise per-cpu Interrupt software masks */
 	if (flags & GIC_FLAG_IPI)
-		set_bit(intr, pcpu_masks[cpu].pcpu_mask);
-	if ((flags & GIC_FLAG_TRANSPARENT) && (cpu_has_veic == 0))
+		set_bit(intr, pcpu_masks[smp_processor_id()].pcpu_mask);
+	if (((flags & GIC_FLAG_TRANSPARENT) && (cpu_has_veic == 0)) ||
+	    (flags & GIC_FLAG_IPI))
 		GIC_SET_INTR_MASK(intr);
 	if (trigtype == GIC_TRIG_EDGE)
 		gic_irq_flags[intr] |= GIC_TRIG_EDGE;
 }
 
-static void __init gic_basic_init(int numintrs, int numvpes,
-			struct gic_intr_map *intrmap, int mapsize)
+static int _gic_intr_map_size;
+static struct gic_intr_map *_gic_intr_map;
+
+void vpe_gic_setup(void)
 {
 	unsigned int i, cpu;
 	unsigned int pin_offset = 0;
 
+	/*
+	 * In EIC mode, the HW_INT# is offset by (2-1). Need to subtract
+	 * one because the GIC will add one (since 0=no intr).
+	 */
+	if (cpu_has_veic)
+		pin_offset = (GIC_CPU_TO_VEC_OFFSET - GIC_PIN_TO_VEC_OFFSET);
+
+	/* Setup specifics */
+	spin_lock(&gic_lock);
+	for (i = 0; i < _gic_intr_map_size; i++) {
+		cpu = _gic_intr_map[i].cpunum;
+		if (cpu == GIC_UNUSED)
+			continue;
+		if (cpu == 0 && i != 0 && _gic_intr_map[i].flags == 0)
+			continue;
+		if (cpu != smp_processor_id())
+			continue;
+		gic_setup_intr(i,
+			_gic_intr_map[i].pin + pin_offset,
+			_gic_intr_map[i].polarity,
+			_gic_intr_map[i].trigtype,
+			_gic_intr_map[i].flags);
+	}
+	spin_unlock(&gic_lock);
+
+	vpe_local_setup();
+}
+
+static void __init gic_basic_init(int numintrs,
+			struct gic_intr_map *intrmap, int mapsize)
+{
+	unsigned int i;
+
 	board_bind_eic_interrupt = &gic_bind_eic_interrupt;
 
-	/* Setup defaults */
+	/* Setup defaults, no need to spin_lock because it is a boot */
 	for (i = 0; i < numintrs; i++) {
 		GIC_SET_POLARITY(i, GIC_POL_POS);
 		GIC_SET_TRIGGER(i, GIC_TRIG_LEVEL);
@@ -326,29 +361,9 @@ static void __init gic_basic_init(int numintrs, int numvpes,
 		}
 	}
 
-	/*
-	 * In EIC mode, the HW_INT# is offset by (2-1). Need to subtract
-	 * one because the GIC will add one (since 0=no intr).
-	 */
-	if (cpu_has_veic)
-		pin_offset = (GIC_CPU_TO_VEC_OFFSET - GIC_PIN_TO_VEC_OFFSET);
-
-	/* Setup specifics */
-	for (i = 0; i < mapsize; i++) {
-		cpu = intrmap[i].cpunum;
-		if (cpu == GIC_UNUSED)
-			continue;
-		if (cpu == 0 && i != 0 && intrmap[i].flags == 0)
-			continue;
-		gic_setup_intr(i,
-			intrmap[i].cpunum,
-			intrmap[i].pin + pin_offset,
-			intrmap[i].polarity,
-			intrmap[i].trigtype,
-			intrmap[i].flags);
-	}
-
-	vpe_local_setup(numvpes);
+	_gic_intr_map_size = mapsize;
+	_gic_intr_map = intrmap;
+	vpe_gic_setup();
 }
 
 void __init gic_init(unsigned long gic_base_addr,
@@ -357,22 +372,20 @@ void __init gic_init(unsigned long gic_base_addr,
 		     unsigned int irqbase)
 {
 	unsigned int gicconfig;
-	int numvpes, numintrs;
+	int numintrs;
 
 	_gic_base = (unsigned long) ioremap_nocache(gic_base_addr,
 						    gic_addrspace_size);
 	gic_irq_base = irqbase;
 
 	GICREAD(GIC_REG(SHARED, GIC_SH_CONFIG), gicconfig);
+	gicconfig &= ~GIC_SH_CONFIG_COUNTSTOP_MSK;
+	GICWRITE(GIC_REG(SHARED, GIC_SH_CONFIG), gicconfig);
 	numintrs = (gicconfig & GIC_SH_CONFIG_NUMINTRS_MSK) >>
 		   GIC_SH_CONFIG_NUMINTRS_SHF;
 	numintrs = ((numintrs + 1) * 8);
 
-	numvpes = (gicconfig & GIC_SH_CONFIG_NUMVPES_MSK) >>
-		  GIC_SH_CONFIG_NUMVPES_SHF;
-	numvpes = numvpes + 1;
-
-	gic_basic_init(numintrs, numvpes, intr_map, intr_map_size);
+	gic_basic_init(numintrs, intr_map, intr_map_size);
 
 	gic_platform_init(numintrs, &gic_irq_controller);
 }
@@ -391,6 +404,7 @@ static ssize_t show_gic_global(struct device *dev,
 		"GIC CounterLo\t\t\t%08x\n"
 		"GIC CounterHi\t\t\t%08x\n"
 		"GIC Revision\t\t\t%08x\n"
+
 		"Global Interrupt Polarity Registers:\t\t%08x %08x %08x %08x\n"
 		"\t\t\t\t\t\t%08x %08x %08x %08x\n"
 		"Global Interrupt Trigger Type Registers:\t%08x %08x %08x %08x\n"
@@ -470,9 +484,30 @@ static ssize_t show_gic_global(struct device *dev,
 		if ((i % 4) == 3)
 			n += snprintf(buf+n, PAGE_SIZE-n, "\n");
 	};
-	n += snprintf(buf+n, PAGE_SIZE-n,
-		"\nDINT Send to Group Register\t\t%08x\n",
-		GIC_REG(SHARED,GIC_DINT));
+
+	if (gcmp3_present) {
+		n += snprintf(buf+n, PAGE_SIZE-n,
+			"EJTAG Break register\t\t\t%08x%08x\n"
+			"Debug Team ID low\t\t\t%08x%08x\n"
+			"Debug Team ID high\t\t\t%08x%08x\n"
+			"Debug Team ID for external VC\t\t%08x\n"
+			"GIC Debug Mode Config Register\t\t%08x\n"
+			"GIC Shared DINT Group Participate\t%08x%08x\n"
+			"GIC Shared Debug Mode Status\t\t%08x%08x\n"
+			,
+			GIC_REGhi(SHARED,GIC_EJTAG), GIC_REG(SHARED,GIC_EJTAG),
+			GIC_REGhi(SHARED,GIC_DTLOW), GIC_REG(SHARED,GIC_DTLOW),
+			GIC_REGhi(SHARED,GIC_DTHI), GIC_REG(SHARED,GIC_DTHI),
+			GIC_REG(SHARED,GIC_DTEXT),
+			GIC_REG(SHARED,GIC_DMODECONF),
+			GIC_REGhi(SHARED,GIC_DINTGRP), GIC_REG(SHARED,GIC_DINTGRP),
+			GIC_REGhi(SHARED,GIC_DMSTATUS), GIC_REG(SHARED,GIC_DMSTATUS)
+		);
+	} else {
+		n += snprintf(buf+n, PAGE_SIZE-n,
+			"\nDINT Send to Group Register\t\t%08x\n",
+			GIC_REG(SHARED,GIC_DINT));
+	}
 
 	return n;
 }
@@ -480,9 +515,11 @@ static ssize_t show_gic_global(struct device *dev,
 static ssize_t show_gic_local(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
+	unsigned long irq_flags;
 	int n = 0;
 	int i;
 
+	local_irq_save(irq_flags);
 	GIC_REG(VPE_LOCAL,GIC_VPE_OTHER_ADDR) = (dev->id);
 
 	n += snprintf(buf+n, PAGE_SIZE-n,
@@ -539,17 +576,24 @@ static ssize_t show_gic_local(struct device *dev,
 	};
 
 	n += snprintf(buf+n, PAGE_SIZE-n,
+		"\nGuest Counter Offset\t\t\t%08x\n",
+		GIC_REG(VPE_OTHER,GIC_VPE_GCTR_OFFSET));
+
+	n += snprintf(buf+n, PAGE_SIZE-n,
 		"\nVPE Local DINT Group Participate Register:\t%08x\n"
 		"VPE Local DebugBreak Group Register:\t\t%08x\n"
 		,
 		GIC_REG(VPE_OTHER,GIC_VPE_DINT),
-		GIC_REG(VPE_OTHER,GIC_VPE_DEBUG_BREAK));
+		GIC_REG(VPE_OTHER,GIC_VPE_DEBUG_BREAK)
+	);
+
+	local_irq_restore(irq_flags);
 
 	return n;
 }
 
 static DEVICE_ATTR(gic_global, 0444, show_gic_global, NULL);
-static DEVICE_ATTR(gic_local, 0444, show_gic_local, NULL);
+static DEVICE_ATTR(gic_local, 0400, show_gic_local, NULL);
 
 static struct bus_type gic_subsys = {
 	.name = "gic",
@@ -589,6 +633,7 @@ static int __init init_gic_sysfs(void)
 	int rc;
 	int vpeN;
 	int vpe;
+	int gvpe;
 
 	if (!gic_present)
 		return 0;
@@ -603,7 +648,11 @@ static int __init init_gic_sysfs(void)
 
 	vpeN = ((GIC_REG(SHARED,GIC_SH_CONFIG) & GIC_SH_CONFIG_NUMVPES_MSK) >> GIC_SH_CONFIG_NUMVPES_SHF) + 1;
 	for (vpe=0; vpe<vpeN; vpe++) {
-		rc = gic_add_vpe(vpe);
+		gvpe = cpu_data[vpe].g_vpe;
+		/* if gvpe == 0 it mean VPE is skipped during boot */
+		if (vpe && !gvpe)
+			continue;
+		rc = gic_add_vpe(gvpe);
 		if (rc)
 			return rc;
 	}

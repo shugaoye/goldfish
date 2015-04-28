@@ -129,6 +129,20 @@ restore_all:				# restore full frame
 	RESTORE_AT
 	RESTORE_STATIC
 restore_partial:		# restore partial frame
+	LONG_L  v0, PT_STATUS(sp)               # returning to kernel mode?
+	andi    v0, v0, KU_USER
+	beqz    v0, 3f
+	LONG_L  v0, TI_FLAGS($28)
+	and     v0, _TIF_FPU_LOSE_REQUEST
+	beqz    v0, 3f
+	SAVE_STATIC
+	SAVE_AT
+	SAVE_TEMP
+	jal     mips_lose_fpu
+	RESTORE_TEMP
+	RESTORE_AT
+	RESTORE_STATIC
+3:
 #ifdef CONFIG_TRACE_IRQFLAGS
 	SAVE_STATIC
 	SAVE_AT

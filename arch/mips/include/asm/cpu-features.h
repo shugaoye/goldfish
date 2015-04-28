@@ -163,6 +163,15 @@
 #define cpu_has_fre             0
 #endif
 #endif /* cpu_has_fre */
+#ifndef cpu_has_htw
+#define cpu_has_htw             (cpu_data[0].options2 & MIPS_CPU_HTW)
+#endif
+#ifndef cpu_has_l2c
+#define cpu_has_l2c             (cpu_data[0].options2 & MIPS_CPU_L2C)
+#endif
+#ifndef cpu_has_vcmt
+#define cpu_has_vcmt            (cpu_data[0].options2 & MIPS_CPU_VC)
+#endif
 
 /*
  * I-Cache snoops remote store.	 This only matters on SMP.  Some multiprocessors
@@ -333,6 +342,10 @@
 #define cpu_has_inclusive_pcaches	(cpu_data[0].options & MIPS_CPU_INCLUSIVE_CACHES)
 #endif
 
+#ifndef cpu_has_cm3_inclusive_pcaches
+#define cpu_has_cm3_inclusive_pcaches       (cpu_data[0].options2 & MIPS_CPU_CM3_INCLUSIVE_CACHES)
+#endif
+
 #ifndef cpu_dcache_line_size
 #define cpu_dcache_line_size()	cpu_data[0].dcache.linesz
 #endif
@@ -353,6 +366,12 @@
 
 #ifndef cpu_has_vz
 #define cpu_has_vz		(cpu_data[0].ases & MIPS_ASE_VZ)
+#endif
+
+#if defined(CONFIG_CPU_HAS_MSA) && !defined(cpu_has_msa)
+# define cpu_has_msa		(cpu_data[0].ases & MIPS_ASE_MSA)
+#elif !defined(cpu_has_msa)
+# define cpu_has_msa		0
 #endif
 
 #endif /* __ASM_CPU_FEATURES_H */

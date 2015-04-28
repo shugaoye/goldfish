@@ -30,6 +30,8 @@
 #define assert(expr) ((void)0)
 
 /* 3bit extended single precision sticky right shift */
+#define XSPSRS(v,rs)    \
+  ((rs > (SP_MBITS+3))?1:((v) >> (rs)) | ((v) << (32-(rs)) != 0))
 #define SPXSRSXn(rs) \
   (xe += rs, \
    xm = (rs > (SP_MBITS+3))?1:((xm) >> (rs)) | ((xm) << (32-(rs)) != 0))
@@ -41,6 +43,8 @@
    (ye+=rs, \
     ym = (rs > (SP_MBITS+3))?1:((ym) >> (rs)) | ((ym) << (32-(rs)) != 0))
 
+#define XSPSRS1(v)      \
+  (((v) >> 1) | ((v) & 1))
 #define SPXSRSY1() \
    (ye++, (ym = (ym >> 1) | (ym & 1)))
 
@@ -81,6 +85,15 @@ extern ieee754sp ieee754sp_format(int, int, unsigned);
     ieee754sp V = ieee754sp_format(s, e, m); \
     if(TSTX()) \
       return ieee754sp_xcpt(V, name, a0, a1); \
+    else \
+      return V; \
+}
+
+#define SPNORMRET3(s, e, m, name, a0, a1, a2) \
+{ \
+    ieee754sp V = ieee754sp_format(s, e, m); \
+    if(TSTX()) \
+      return ieee754sp_xcpt(V, name, a0, a1, a2); \
     else \
       return V; \
 }

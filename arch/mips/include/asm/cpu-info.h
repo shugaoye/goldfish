@@ -41,6 +41,7 @@ struct cache_desc {
 struct cpuinfo_mips {
 	unsigned int		udelay_val;
 	unsigned int		asid_cache;
+	unsigned int            htw_level;
 
 	/*
 	 * Capability and feature descriptor structure for MIPS CPU
@@ -50,6 +51,7 @@ struct cpuinfo_mips {
 	unsigned long		ases;
 	unsigned int		processor_id;
 	unsigned int		fpu_id;
+	unsigned int		msa_id;
 	unsigned int		cputype;
 	int			isa_level;
 	int			tlbsize;
@@ -72,7 +74,8 @@ struct cpuinfo_mips {
 	 * exception resources, ASID spaces, etc, are common
 	 * to all TCs within the same VPE.
 	 */
-	int			vpe_id;	 /* Virtual Processor number */
+	int                     vpe_id;  /* Virtual Processor number in Core */
+	int                     g_vpe;   /* Global Virtual Processor number in CM3*/
 #endif
 #ifdef CONFIG_MIPS_MT_SMTC
 	int			tc_id;	 /* Thread Context number */

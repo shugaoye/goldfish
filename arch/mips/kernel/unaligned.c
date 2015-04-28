@@ -107,6 +107,11 @@ static u32 unaligned_action;
 extern void show_registers(struct pt_regs *regs);
 asmlinkage void do_cpu(struct pt_regs *regs);
 
+#ifdef CONFIG_CPU_HAS_MSA
+void msa_to_wd(unsigned int wd, union fpureg *from);
+void msa_from_wd(unsigned int wd, union fpureg *to);
+#endif
+
 #ifdef CONFIG_EVA
 /* EVA variant */
 
@@ -1488,6 +1493,65 @@ static inline void mfc1_pair(unsigned long *val, unsigned long *val2, unsigned r
 	*val2 = lval2;
 }
 
+#ifdef CONFIG_CPU_HAS_MSA
+#ifdef __BIG_ENDIAN
+/*
+ * MSA data format conversion.
+ * Only for BIG ENDIAN - LITTLE ENDIAN has register format which matches memory
+ * layout contiguously.
+ *
+ * Conversion is done between two Double words and other formats (W/H/B)
+ * because kernel uses LD.D and ST.D to load/store MSA registers and keeps
+ * MSA registers in this format in current->thread.fpu.fpr
+ */
+static void msa_convert(union fpureg *to, union fpureg *from, int fmt)
+{
+	switch (fmt) {
+	case 0: /* byte */
+		to->val8[0] = from->val8[7];
+		to->val8[1] = from->val8[6];
+		to->val8[2] = from->val8[5];
+		to->val8[3] = from->val8[4];
+		to->val8[4] = from->val8[3];
+		to->val8[5] = from->val8[2];
+		to->val8[6] = from->val8[1];
+		to->val8[7] = from->val8[0];
+		to->val8[8] = from->val8[15];
+		to->val8[9] = from->val8[14];
+		to->val8[10] = from->val8[13];
+		to->val8[11] = from->val8[12];
+		to->val8[12] = from->val8[11];
+		to->val8[13] = from->val8[10];
+		to->val8[14] = from->val8[9];
+		to->val8[15] = from->val8[8];
+		break;
+
+	case 1: /* halfword */
+		to->val16[0] = from->val16[3];
+		to->val16[1] = from->val16[2];
+		to->val16[2] = from->val16[1];
+		to->val16[3] = from->val16[0];
+		to->val16[4] = from->val16[7];
+		to->val16[5] = from->val16[6];
+		to->val16[6] = from->val16[5];
+		to->val16[7] = from->val16[4];
+		break;
+
+	case 2: /* word */
+		to->val32[0] = from->val32[1];
+		to->val32[1] = from->val32[0];
+		to->val32[2] = from->val32[3];
+		to->val32[3] = from->val32[2];
+		break;
+
+	case 3: /* doubleword, no conversion */
+		to->val64[0] = from->val64[0];
+		to->val64[1] = from->val64[1];
+		break;
+	}
+}
+#endif
+#endif
 
 static void emulate_load_store_insn(struct pt_regs *regs,
 	void __user *addr, unsigned int __user *pc)
@@ -1500,6 +1564,10 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 	void __user *fault_addr = NULL;
 #ifdef CONFIG_EVA
 	mm_segment_t seg;
+#endif
+#ifdef CONFIG_CPU_HAS_MSA
+	union fpureg msadatabase[2], *msadata;
+	unsigned int func, df, rs, wd;
 #endif
 
 	origpc = (unsigned long)pc;
@@ -1867,6 +1935,83 @@ fpu_continue:
 		if (res == 0)
 			break;
 		return;
+
+#ifdef CONFIG_CPU_HAS_MSA
+	case msa_op:
+		if (cpu_has_mdmx)
+			goto sigill;
+
+		func = insn.msa_mi10_format.func;
+		switch (func) {
+		default:
+			goto sigbus;
+
+		case msa_ld_op:
+		case msa_st_op:
+			;
+		}
+
+		if (!thread_msa_context_live())
+			goto sigbus;
+
+		df = insn.msa_mi10_format.df;
+		rs = insn.msa_mi10_format.rs;
+		wd = insn.msa_mi10_format.wd;
+		addr = (unsigned long *)(regs->regs[rs] + (insn.msa_mi10_format.s10 << df));
+		/* align a working space in stack... */
+		msadata = (union fpureg *)(((unsigned long)msadatabase + 15) & ~(unsigned long)0xf);
+		if (func == msa_ld_op) {
+			if (!access_ok(VERIFY_READ, addr, 16))
+				goto sigbus;
+			compute_return_epc(regs);
+			res = __copy_from_user_inatomic(msadata, addr, 16);
+			if (res)
+				goto fault;
+			preempt_disable();
+			if (test_thread_flag(TIF_USEDMSA)) {
+#ifdef __BIG_ENDIAN
+				msa_convert(&current->thread.fpu.fpr[wd], msadata, df);
+				msa_to_wd(wd, &current->thread.fpu.fpr[wd]);
+#else
+				msa_to_wd(wd, msadata);
+#endif
+				preempt_enable();
+			} else {
+				preempt_enable();
+#ifdef __BIG_ENDIAN
+				msa_convert(&current->thread.fpu.fpr[wd], msadata, df);
+#else
+				current->thread.fpu.fpr[wd] = *msadata;
+#endif
+			}
+		} else {
+			if (!access_ok(VERIFY_WRITE, addr, 16))
+				goto sigbus;
+			compute_return_epc(regs);
+			preempt_disable();
+			if (test_thread_flag(TIF_USEDMSA)) {
+#ifdef __BIG_ENDIAN
+				msa_from_wd(wd, &current->thread.fpu.fpr[wd]);
+				msa_convert(msadata, &current->thread.fpu.fpr[wd], df);
+#else
+				msa_from_wd(wd, msadata);
+#endif
+				preempt_enable();
+			} else {
+				preempt_enable();
+#ifdef __BIG_ENDIAN
+				msa_convert(msadata, &current->thread.fpu.fpr[wd], df);
+#else
+				*msadata = current->thread.fpu.fpr[wd];
+#endif
+			}
+			res = __copy_to_user_inatomic(addr, msadata, 16);
+			if (res)
+				goto fault;
+		}
+
+		break;
+#endif /* CONFIG_CPU_HAS_MSA */
 
 #ifndef CONFIG_CPU_MIPSR6
 	/*

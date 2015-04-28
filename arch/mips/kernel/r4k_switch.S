@@ -29,18 +29,8 @@
 #define ST_OFF (_THREAD_SIZE - 32 - PT_SIZE + PT_STATUS)
 
 /*
- * FPU context is saved iff the process has used it's FPU in the current
- * time slice as indicated by _TIF_USEDFPU.  In any case, the CU1 bit for user
- * space STATUS register should be 0, so that a process *always* starts its
- * userland with FPU disabled after each context switch.
- *
- * FPU will be enabled as soon as the process accesses FPU again, through
- * do_cpu() trap.
- */
-
-/*
  * task_struct *resume(task_struct *prev, task_struct *next,
- *		       struct thread_info *next_ti, int usedfpu)
+ *		       struct thread_info *next_ti, s32 fp_save)
  */
 	.align	5
 	.set hardfloat
@@ -51,15 +41,21 @@
 	LONG_S	ra, THREAD_REG31(a0)
 
 	/*
-	 * check if we need to save FPU registers
+	 * Check whether we need to save any FP context. FP context is saved
+	 * iff the process has used the context with the scalar FPU or the MSA
+	 * ASE in the current time slice, as indicated by _TIF_USEDFPU and
+	 * _TIF_USEDMSA respectively. switch_to will have set fp_save
+	 * accordingly to an FP_SAVE_ enum value.
 	 */
+	beqz    a3, 3f
 
-	beqz	a3, 1f
-
-	PTR_L	t3, TASK_THREAD_INFO(a0)
 	/*
-	 * clear saved user stack CU1 bit
+	 * We do. Clear the saved CU1 bit for prev, such that next time it is
+	 * scheduled it will start in userland with the FPU disabled. If the
+	 * task uses the FPU then it will be enabled again via the do_cpu trap.
+	 * This allows us to lazily restore the FP context.
 	 */
+	PTR_L	t3, TASK_THREAD_INFO(a0)
 	LONG_L	t0, ST_OFF(t3)
 	li	t1, ~ST0_CU1
 	and	t0, t0, t1
@@ -92,8 +88,24 @@
 	mtc0    t0, CP0_STATUS
 	enable_fpu_hazard
 
-	fpu_save_double a0 t0 t1                # c0_status passed in t0
+	/* Check whether we're saving scalar or vector context. */
+	andi    a3, a3, 0x2
+	beqz    a3, 1f
+
+	/* Save 128b MSA vector context + scalar FP control & status. */
+	.set push
+	SET_HARDFLOAT
+	fpu_get_fcr31   a0 t0 t1
+	msa_save_all	a0
+	.set pop	/* SET_HARDFLOAT */
+
+	sw	t1, THREAD_FCR31(a0)
+	b	2f
+
+1:	/* Save 32b/64b scalar FP context. */
+	fpu_save_double a0 t0 t1		# c0_status passed in t0
 						# clobbers t1
+2:
 	mtc0    t2, CP0_STATUS
 
 #endif /* CONFIG_MIPS_MT_SMTC */
@@ -103,7 +115,7 @@
 						# clobbers t1
 #endif
 
-1:
+3:
 	/*
 	 * The order of restoring the registers takes care of the race
 	 * updating $28, $29 and kernelsp without disabling ints.
@@ -175,6 +187,31 @@ LEAF(_restore_fp)
 	jr	ra
 	END(_restore_fp)
 
+#ifdef CONFIG_CPU_HAS_MSA
+
+/*
+ * Save a thread's MSA vector context.
+ */
+LEAF(_save_msa)
+	msa_save_all	a0
+	jr	ra
+	END(_save_msa)
+
+/*
+ * Restore a thread's MSA vector context.
+ */
+LEAF(_restore_msa)
+	msa_restore_all	a0
+	jr	ra
+	END(_restore_msa)
+
+LEAF(_init_msa_upper)
+	msa_init_all_upper
+	jr	ra
+	END(_init_msa_upper)
+
+#endif
+
 /*
  * Load the FPU with signalling NANS.  This bit pattern we're using has
  * the property that no matter whether considered as single or as double
@@ -182,6 +219,9 @@ LEAF(_restore_fp)
  *
  * We initialize fcr31 to rounding to nearest, no exceptions.
  */
+
+	.set push
+	SET_HARDFLOAT
 
 LEAF(_init_fpu)
 #ifdef CONFIG_MIPS_MT_SMTC
@@ -245,7 +285,14 @@ LEAF(_init_fpu)
 #endif /* CONFIG_64BIT */
 
 #ifdef CONFIG_CPU_MIPS32
+
+/* preprocessor replaces the fp in ".set fp=64" with $30 otherwise */
+#undef fp
+
 #if defined(CONFIG_CPU_MIPS32_R2) || defined(CONFIG_CPU_MIPS32_R6)
+	.set    push
+	.set    mips32r2
+	.set    fp=64
 	sll     t0, t0, 31 - _ST0_FR
 	bgez    t0, 2f                          # 16 / 32 register mode?
 
@@ -257,6 +304,7 @@ LEAF(_init_fpu)
 	beq     t2, $0, 2f
 	li      t1, 0x7fa00000                  # SNaN 2008, SP
 	li      t3, 0x7ff00000                  # SNaN 2008, DP high word
+	.set    pop
 2:
 #endif
 	mtc1	t1, $f0
@@ -297,7 +345,8 @@ LEAF(_init_fpu)
 
 	move    t1, t3                          # move SNaN, DP high word
 	.set    push
-	.set    mips64r2
+	.set    mips32r2
+	.set    fp=64
 	mthc1   t1, $f0
 	mthc1   t1, $f1
 	mthc1   t1, $f2
@@ -337,7 +386,7 @@ LEAF(_init_fpu)
 #ifdef CONFIG_CPU_MIPS64_R6
 	.set    mips64r6
 #else
-	.set	mips3
+	.set    arch=r4000
 #endif
 	dmtc1	t1, $f0
 	dmtc1	t1, $f2
@@ -358,3 +407,5 @@ LEAF(_init_fpu)
 #endif /* CONFIG_CPU_MIPS32 */
 	jr	ra
 	END(_init_fpu)
+
+	.set pop	/* SET_HARDFLOAT */

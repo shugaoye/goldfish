@@ -110,7 +110,11 @@ static inline void set_bit(unsigned long nr, volatile unsigned long *addr)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %2, %1                          \n"
+#else
+			"       la      %2, %1                          \n"
+#endif
 			"       " __LL "%0, 0(%2)       # set_bit       \n"
 			"       or      %0, %3                          \n"
 			"       " __SC "%0, 0(%2)                       \n"
@@ -176,7 +180,11 @@ static inline void clear_bit(unsigned long nr, volatile unsigned long *addr)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %2, %1                          \n"
+#else
+			"       la      %2, %1                          \n"
+#endif
 			"       " __LL "%0, 0(%2)       # clear_bit     \n"
 			"       and     %0, %3                          \n"
 			"       " __SC "%0, 0(%2)                       \n"
@@ -248,7 +256,11 @@ static inline void change_bit(unsigned long nr, volatile unsigned long *addr)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %2, %1                          \n"
+#else
+			"       la      %2, %1                          \n"
+#endif
 			"       " __LL "%0, 0(%2)       # change_bit    \n"
 			"       xor     %0, %3                          \n"
 			"       " __SC "%0, 0(%2)                       \n"
@@ -311,7 +323,11 @@ static inline int test_and_set_bit(unsigned long nr,
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %3, %1                          \n"
+#else
+			"       la      %3, %1                          \n"
+#endif
 			"       " __LL "%0, 0(%3) # test_and_set_bit    \n"
 			"       or      %2, %0, %4                      \n"
 			"       " __SC "%2, 0(%3)                       \n"
@@ -380,7 +396,11 @@ static inline int test_and_set_bit_lock(unsigned long nr,
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %3, %1                          \n"
+#else
+			"       la      %3, %1                          \n"
+#endif
 			"       " __LL "%0, 0(%3) # test_and_set_bit    \n"
 			"       or      %2, %0, %4                      \n"
 			"       " __SC "%2, 0(%3)                       \n"
@@ -467,7 +487,11 @@ static inline int test_and_clear_bit(unsigned long nr,
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %3, %1                          \n"
+#else
+			"       la      %3, %1                          \n"
+#endif
 			"       " __LL  "%0, 0(%3) # test_and_clear_bit \n"
 			"       or      %2, %0, %4                      \n"
 			"       xor     %2, %4                          \n"
@@ -540,7 +564,11 @@ static inline int test_and_change_bit(unsigned long nr,
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %3, %1                          \n"
+#else
+			"       la      %3, %1                          \n"
+#endif
 			"       " __LL  "%0, 0(%3) # test_and_change_bit \n"
 			"       xor     %2, %0, %4                      \n"
 			"       " __SC  "%2, 0(%3)                      \n"

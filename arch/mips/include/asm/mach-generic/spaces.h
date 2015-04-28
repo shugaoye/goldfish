@@ -6,6 +6,7 @@
  * Copyright (C) 1994 - 1999, 2000, 03, 04 Ralf Baechle
  * Copyright (C) 2000, 2002  Maciej W. Rozycki
  * Copyright (C) 1990, 1999, 2000 Silicon Graphics, Inc.
+ * Copyright (C) 2015 Imagination Technologies
  */
 #ifndef _ASM_MACH_GENERIC_SPACES_H
 #define _ASM_MACH_GENERIC_SPACES_H
@@ -53,7 +54,9 @@
 
 #ifndef CAC_BASE
 #ifdef CONFIG_DMA_NONCOHERENT
+#ifndef CONFIG_MIPS_CMP
 #define CAC_BASE		_AC(0x9800000000000000, UL)
+#endif
 #else
 #define CAC_BASE		_AC(0xa800000000000000, UL)
 #endif

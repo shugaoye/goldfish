@@ -24,7 +24,7 @@
 #include <asm/addrspace.h>
 #include <asm/byteorder.h>
 
-#define MSK(n)			((1 << (n)) - 1)
+#define MSK(n)                  ((1UL << (n)) - 1)
 
 /*
  *  Register offset addresses

@@ -36,6 +36,7 @@
 #include <asm/vdso.h>
 #include <asm/dsp.h>
 #include <asm/inst.h>
+#include <asm/msa.h>
 
 #include "signal-common.h"
 
@@ -45,14 +46,17 @@ static int (*restore_fp_context)(struct sigcontext __user *sc);
 extern asmlinkage int _save_fp_context(struct sigcontext __user *sc);
 extern asmlinkage int _restore_fp_context(struct sigcontext __user *sc);
 
-extern asmlinkage int fpu_emulator_save_context(struct sigcontext __user *sc);
-extern asmlinkage int fpu_emulator_restore_context(struct sigcontext __user *sc);
+extern asmlinkage int _save_msa_all_upper(void __user *buf);
+extern asmlinkage int _restore_msa_all_upper(void __user *buf);
 
 struct sigframe {
 	u32 sf_ass[4];		/* argument save space for o32 */
 	u32 sf_pad[2];		/* Was: signal trampoline */
+
+	/* Matches struct ucontext from its uc_mcontext field onwards */
 	struct sigcontext sf_sc;
 	sigset_t sf_mask;
+	unsigned long long sf_extcontext[0];
 };
 
 struct rt_sigframe {
@@ -62,109 +66,175 @@ struct rt_sigframe {
 	struct ucontext rs_uc;
 };
 
-/*
- * Helper routines
- */
-static int protected_save_fp_context(struct sigcontext __user *sc)
-{
-	int err;
-#ifndef CONFIG_EVA
-	int err2;
+#define SUFFIX(n) n
+typedef struct sigcontext user_sigcontext_t;
+#include "signal-common.c"
 
-	while (1) {
-		lock_fpu_owner();
-		err2 = own_fpu_inatomic(1);
-		if (!err2)
-			err = save_fp_context(sc); /* this might fail */
-		unlock_fpu_owner();
-		if (err2)
-			err = fpu_emulator_save_context(sc);
-		if (likely(!err))
-			break;
-		/* touch the sigcontext and try again */
-		err = __put_user(0, &sc->sc_fpregs[0]) |
-			__put_user(0, &sc->sc_fpregs[31]) |
-			__put_user(0, &sc->sc_fpc_csr);
-		if (err)
-			break;	/* really bad sigcontext */
-	}
-#else
-	lose_fpu(1);
-	err = save_fp_context(sc); /* this might fail */
-#endif  /* CONFIG_EVA */
-	return err;
+static size_t extcontext_max_size(void)
+{
+	size_t sz = 0;
+
+	/*
+	 * The assumption here is that between this point & the point at which
+	 * the extended context is saved the size of the context should only
+	 * ever be able to shrink (if the task is preempted), but never grow.
+	 * That is, what this function returns is an upper bound on the size of
+	 * the extended context for the current task at the current time.
+	 */
+
+	if (thread_msa_context_live())
+		sz += sizeof(struct msa_extcontext);
+
+	/* If any context is saved then we'll append the end marker */
+	if (sz)
+		sz += sizeof(((struct extcontext *)NULL)->magic);
+
+	return sz;
 }
 
-static int protected_restore_fp_context(struct sigcontext __user *sc)
+static int save_msa_extcontext(void __user *buf)
 {
-	int err, tmp __maybe_unused;
-#ifndef CONFIG_EVA
-	int err2;
+	struct msa_extcontext __user *msa = buf;
+	uint64_t val;
+	int i, err;
 
-	while (1) {
-		lock_fpu_owner();
-		err2 = own_fpu_inatomic(0);
-		if (!err2)
-			err = restore_fp_context(sc); /* this might fail */
-		unlock_fpu_owner();
-		if (err2)
-			err = fpu_emulator_restore_context(sc);
-		if (likely(!err))
-			break;
-		/* touch the sigcontext and try again */
-		err = __get_user(tmp, &sc->sc_fpregs[0]) |
-			__get_user(tmp, &sc->sc_fpregs[31]) |
-			__get_user(tmp, &sc->sc_fpc_csr);
-		if (err)
-			break;	/* really bad sigcontext */
-	}
-#else
-	lose_fpu(0);
-	err = restore_fp_context(sc); /* this might fail */
-#endif  /* CONFIG_EVA */
-	return err;
-}
+	if (!thread_msa_context_live())
+		return 0;
 
-int setup_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
-{
-	int err = 0;
-	int i;
-	unsigned int used_math;
+	/*
+	 * Ensure that we can't lose the live MSA context between checking
+	 * for it & writing it to memory.
+	 */
+	preempt_disable();
 
-	err |= __put_user(regs->cp0_epc, &sc->sc_pc);
-
-	err |= __put_user(0, &sc->sc_regs[0]);
-	for (i = 1; i < 32; i++)
-		err |= __put_user(regs->regs[i], &sc->sc_regs[i]);
-
-#ifdef CONFIG_CPU_HAS_SMARTMIPS
-	err |= __put_user(regs->acx, &sc->sc_acx);
-#endif
-	err |= __put_user(regs->hi, &sc->sc_mdhi);
-	err |= __put_user(regs->lo, &sc->sc_mdlo);
-#ifndef CONFIG_CPU_MIPSR6
-	if (cpu_has_dsp) {
-		err |= __put_user(mfhi1(), &sc->sc_hi1);
-		err |= __put_user(mflo1(), &sc->sc_lo1);
-		err |= __put_user(mfhi2(), &sc->sc_hi2);
-		err |= __put_user(mflo2(), &sc->sc_lo2);
-		err |= __put_user(mfhi3(), &sc->sc_hi3);
-		err |= __put_user(mflo3(), &sc->sc_lo3);
-		err |= __put_user(rddsp(DSP_MASK), &sc->sc_dsp);
-	}
-#endif
-
-	used_math = !!used_math();
-	err |= __put_user(used_math, &sc->sc_used_math);
-
-	if (used_math) {
+	if (is_msa_enabled()) {
 		/*
-		 * Save FPU state to signal context. Signal handler
-		 * will "inherit" current FPU state.
+		 * There are no EVA versions of the vector register load/store
+		 * instructions, so MSA context has to be saved to kernel memory
+		 * and then copied to user memory. The save to kernel memory
+		 * should already have been done when handling scalar FP
+		 * context.
 		 */
-		err |= protected_save_fp_context(sc);
+		BUG_ON(config_enabled(CONFIG_EVA));
+
+		err = __put_user(read_msa_csr(), &msa->csr);
+		err |= _save_msa_all_upper(&msa->wr);
+
+		preempt_enable();
+	} else {
+		preempt_enable();
+
+		err = __put_user(current->thread.fpu.msacsr, &msa->csr);
+
+		for (i = 0; i < NUM_FPU_REGS; i++) {
+			val = get_fpr64(&current->thread.fpu.fpr[i], 1);
+			err |= __put_user(val, &msa->wr[i]);
+		}
 	}
+
+	err |= __put_user(MSA_EXTCONTEXT_MAGIC, &msa->ext.magic);
+	err |= __put_user(sizeof(*msa), &msa->ext.size);
+
+	return err ? -EFAULT : sizeof(*msa);
+}
+
+static int restore_msa_extcontext(void __user *buf, unsigned int size)
+{
+	struct msa_extcontext __user *msa = buf;
+	unsigned long long val;
+	unsigned int csr;
+	int i, err;
+
+	if (size != sizeof(*msa))
+		return -EINVAL;
+
+	err = get_user(csr, &msa->csr);
+	if (err)
+		return err;
+
+	preempt_disable();
+
+	if (is_msa_enabled()) {
+		/*
+		 * There are no EVA versions of the vector register load/store
+		 * instructions, so MSA context has to be copied to kernel
+		 * memory and later loaded to registers. The same is true of
+		 * scalar FP context, so FPU & MSA should have already been
+		 * disabled whilst handling scalar FP context.
+		 */
+		BUG_ON(config_enabled(CONFIG_EVA));
+
+		write_msa_csr(csr);
+		err |= _restore_msa_all_upper(&msa->wr);
+		preempt_enable();
+	} else {
+		preempt_enable();
+
+		current->thread.fpu.msacsr = csr;
+
+		for (i = 0; i < NUM_FPU_REGS; i++) {
+			err |= __get_user(val, &msa->wr[i]);
+			set_fpr64(&current->thread.fpu.fpr[i], 1, val);
+		}
+	}
+
 	return err;
+}
+
+int save_extcontext(void __user *buf)
+{
+	int sz;
+
+	sz = save_msa_extcontext(buf);
+	if (sz < 0)
+		return sz;
+	buf += sz;
+
+	/* If no context was saved then trivially return */
+	if (!sz)
+		return 0;
+
+	/* Write the end marker */
+	if (__put_user(END_EXTCONTEXT_MAGIC, (u32 *)buf))
+		return -EFAULT;
+
+	sz += sizeof(((struct extcontext *)NULL)->magic);
+	return sz;
+}
+
+int restore_extcontext(void __user *buf)
+{
+	struct extcontext ext;
+	int err;
+
+	while (1) {
+		err = __get_user(ext.magic, (unsigned int *)buf);
+		if (err)
+			return err;
+
+		if (ext.magic == END_EXTCONTEXT_MAGIC)
+			return 0;
+
+		err = __get_user(ext.size, (unsigned int *)(buf
+			+ offsetof(struct extcontext, size)));
+		if (err)
+			return err;
+
+		switch (ext.magic) {
+		case MSA_EXTCONTEXT_MAGIC:
+			err = restore_msa_extcontext(buf, ext.size);
+			break;
+
+		default:
+			err = -EINVAL;
+			break;
+		}
+
+		if (err)
+			return err;
+
+		buf += ext.size;
+	}
 }
 
 int fpcsr_pending(unsigned int __user *fpcsr)
@@ -186,71 +256,13 @@ int fpcsr_pending(unsigned int __user *fpcsr)
 	return err ?: sig;
 }
 
-static int
-check_and_restore_fp_context(struct sigcontext __user *sc)
-{
-	int err, sig;
-
-	err = sig = fpcsr_pending(&sc->sc_fpc_csr);
-	if (err > 0)
-		err = 0;
-	err |= protected_restore_fp_context(sc);
-	return err ?: sig;
-}
-
-int restore_sigcontext(struct pt_regs *regs, struct sigcontext __user *sc)
-{
-	unsigned int used_math;
-#ifndef CONFIG_CPU_MIPSR6
-	unsigned long treg;
-#endif
-	int err = 0;
-	int i;
-
-	/* Always make any pending restarted system calls return -EINTR */
-	current_thread_info()->restart_block.fn = do_no_restart_syscall;
-
-	err |= __get_user(regs->cp0_epc, &sc->sc_pc);
-
-#ifdef CONFIG_CPU_HAS_SMARTMIPS
-	err |= __get_user(regs->acx, &sc->sc_acx);
-#endif
-	err |= __get_user(regs->hi, &sc->sc_mdhi);
-	err |= __get_user(regs->lo, &sc->sc_mdlo);
-#ifndef CONFIG_CPU_MIPSR6
-	if (cpu_has_dsp) {
-		err |= __get_user(treg, &sc->sc_hi1); mthi1(treg);
-		err |= __get_user(treg, &sc->sc_lo1); mtlo1(treg);
-		err |= __get_user(treg, &sc->sc_hi2); mthi2(treg);
-		err |= __get_user(treg, &sc->sc_lo2); mtlo2(treg);
-		err |= __get_user(treg, &sc->sc_hi3); mthi3(treg);
-		err |= __get_user(treg, &sc->sc_lo3); mtlo3(treg);
-		err |= __get_user(treg, &sc->sc_dsp); wrdsp(treg, DSP_MASK);
-	}
-#endif
-
-	for (i = 1; i < 32; i++)
-		err |= __get_user(regs->regs[i], &sc->sc_regs[i]);
-
-	err |= __get_user(used_math, &sc->sc_used_math);
-	conditional_used_math(used_math);
-
-	if (used_math) {
-		/* restore fpu context if we have used it before */
-		if (!err)
-			err = check_and_restore_fp_context(sc);
-	} else {
-		/* signal handler may have used FPU.  Give it up. */
-		lose_fpu(0);
-	}
-
-	return err;
-}
-
 void __user *get_sigframe(struct k_sigaction *ka, struct pt_regs *regs,
 			  size_t frame_size)
 {
 	unsigned long sp;
+
+	/* Leave space for potential extended context */
+	frame_size += extcontext_max_size();
 
 	/* Default to using normal stack */
 	sp = regs->regs[29];
@@ -619,20 +631,30 @@ static int smp_save_fp_context(struct sigcontext __user *sc)
 {
 	return raw_cpu_has_fpu
 	       ? _save_fp_context(sc)
-	       : fpu_emulator_save_context(sc);
+	       : copy_fp_to_sigcontext(sc);
 }
 
 static int smp_restore_fp_context(struct sigcontext __user *sc)
 {
 	return raw_cpu_has_fpu
 	       ? _restore_fp_context(sc)
-	       : fpu_emulator_restore_context(sc);
+	       : copy_fp_from_sigcontext(sc);
 }
 #endif
 #endif
 
 static int signal_setup(void)
 {
+	/*
+	 * The offset from sigcontext to extended context should be the same
+	 * regardless of the type of signal, such that userland can always know
+	 * where to look if it wishes to find the extended context structures.
+	 */
+	BUILD_BUG_ON((offsetof(struct sigframe, sf_extcontext) -
+		      offsetof(struct sigframe, sf_sc)) !=
+		     (offsetof(struct rt_sigframe, rs_uc.uc_extcontext) -
+		      offsetof(struct rt_sigframe, rs_uc.uc_mcontext)));
+
 #ifndef CONFIG_EVA
 #ifdef CONFIG_SMP
 	/* For now just do the cpu_has_fpu check when the functions are invoked */
@@ -643,13 +665,13 @@ static int signal_setup(void)
 		save_fp_context = _save_fp_context;
 		restore_fp_context = _restore_fp_context;
 	} else {
-		save_fp_context = fpu_emulator_save_context;
-		restore_fp_context = fpu_emulator_restore_context;
+		save_fp_context = copy_fp_to_sigcontext;
+		restore_fp_context = copy_fp_from_sigcontext;
 	}
 #endif /* CONFIG_SMP */
 #else
-	save_fp_context = fpu_emulator_save_context;
-	restore_fp_context = fpu_emulator_restore_context;
+	save_fp_context = copy_fp_to_sigcontext;
+	restore_fp_context = copy_fp_from_sigcontext;
 #endif /* CONFIG_EVA */
 
 	return 0;

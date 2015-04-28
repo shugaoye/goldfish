@@ -21,5 +21,19 @@
 #define MIPS_FIXADE		   7	/* control address error fixing	 */
 #define MIPS_RDNVRAM		  10	/* read NVRAM */
 #define MIPS_ATOMIC_SET		2001	/* atomically set variable	 */
+#define MIPS_FPU_PRCTL          2002    /* FPU mode/emulation fine control */
+
+#ifndef PR_SET_FP_MODE
+#define PR_SET_FP_MODE 43
+#endif
+#ifndef PR_GET_FP_MODE
+#define PR_GET_FP_MODE 44
+#endif
+#ifndef PR_FP_MODE_FR
+#define PR_FP_MODE_FR  (1 << 0)
+#endif
+#ifndef PR_FP_MODE_FRE
+#define PR_FP_MODE_FRE (1 << 1)
+#endif
 
 #endif /* _ASM_SYSMIPS_H */

@@ -105,60 +105,42 @@ int ptrace_setregs(struct task_struct *child, __s64 __user *data)
 int ptrace_getfpregs(struct task_struct *child, __u32 __user *data)
 {
 	int i;
-	unsigned int tmp;
 
 	if (!access_ok(VERIFY_WRITE, data, 33 * 8))
 		return -EIO;
 
 	if (tsk_used_math(child)) {
-		fpureg_t *fregs = get_fpu_regs(child);
-		for (i = 0; i < 32; i++)
-			__put_user(fregs[i], i + (__u64 __user *) data);
+		union fpureg *fregs = get_fpu_regs(child);
+		for (i = 0; i < NUM_FPU_REGS; i++)
+			__put_user(get_fpr64(&fregs[i], 0),
+				   i + (__u64 __user *)data);
 	} else {
-		for (i = 0; i < 32; i++)
+		for (i = 0; i < NUM_FPU_REGS; i++)
 			__put_user((__u64) -1, i + (__u64 __user *) data);
 	}
 
 	__put_user(child->thread.fpu.fcr31, data + 64);
-
-	preempt_disable();
-	if (cpu_has_fpu) {
-		unsigned int flags;
-
-		if (cpu_has_mipsmt) {
-			unsigned int vpflags = dvpe();
-			flags = read_c0_status();
-			__enable_fpu();
-			__asm__ __volatile__(".set push\n.set hardfloat\ncfc1\t%0,$0\n.set pop" : "=r" (tmp));
-			write_c0_status(flags);
-			evpe(vpflags);
-		} else {
-			flags = read_c0_status();
-			__enable_fpu();
-			__asm__ __volatile__(".set push\n.set hardfloat\ncfc1\t%0,$0\n.set pop" : "=r" (tmp));
-			write_c0_status(flags);
-		}
-	} else {
-		tmp = 0;
-	}
-	preempt_enable();
-	__put_user(tmp, data + 65);
+	__put_user(current_cpu_data.fpu_id, data + 65);
 
 	return 0;
 }
 
 int ptrace_setfpregs(struct task_struct *child, __u32 __user *data)
 {
-	fpureg_t *fregs;
+	union fpureg *fregs;
+	u64 fpr_val;
 	int i;
 
 	if (!access_ok(VERIFY_READ, data, 33 * 8))
 		return -EIO;
 
+	init_fp_ctx(child);
 	fregs = get_fpu_regs(child);
 
-	for (i = 0; i < 32; i++)
-		__get_user(fregs[i], i + (__u64 __user *) data);
+	for (i = 0; i < NUM_FPU_REGS; i++) {
+		__get_user(fpr_val, i + (__u64 __user *)data);
+		set_fpr64(&fregs[i], 0, fpr_val);
+	}
 
 	__get_user(child->thread.fpu.fcr31, data + 64);
 
@@ -272,6 +254,7 @@ long arch_ptrace(struct task_struct *child, long request,
 	/* Read the word at location addr in the USER area. */
 	case PTRACE_PEEKUSR: {
 		struct pt_regs *regs;
+		union fpureg *fregs;
 		unsigned long tmp = 0;
 
 		regs = task_pt_regs(child);
@@ -282,26 +265,26 @@ long arch_ptrace(struct task_struct *child, long request,
 			tmp = regs->regs[addr];
 			break;
 		case FPR_BASE ... FPR_BASE + 31:
-			if (tsk_used_math(child)) {
-				fpureg_t *fregs = get_fpu_regs(child);
+			if (!tsk_used_math(child)) {
+				/* FP not yet used */
+				tmp = -1;
+				break;
+			}
+			fregs = get_fpu_regs(child);
 
 #ifdef CONFIG_32BIT
+			if (!test_thread_local_flags(LTIF_FPU_FR)) {
 				/*
 				 * The odd registers are actually the high
 				 * order bits of the values stored in the even
 				 * registers - unless we're using r2k_switch.S.
 				 */
-				if (addr & 1)
-					tmp = (unsigned long) (fregs[((addr & ~1) - 32)] >> 32);
-				else
-					tmp = (unsigned long) (fregs[(addr - 32)] & 0xffffffff);
-#endif
-#ifdef CONFIG_64BIT
-				tmp = fregs[addr - FPR_BASE];
-#endif
-			} else {
-				tmp = -1;	/* FP not yet used  */
+				tmp = get_fpr32(&fregs[(addr & ~1) - FPR_BASE],
+						addr & 1);
+				break;
 			}
+#endif
+			tmp = get_fpr32(&fregs[addr - FPR_BASE], 0);
 			break;
 		case PC:
 			tmp = regs->cp0_epc;
@@ -326,44 +309,10 @@ long arch_ptrace(struct task_struct *child, long request,
 		case FPC_CSR:
 			tmp = child->thread.fpu.fcr31;
 			break;
-		case FPC_EIR: { /* implementation / version register */
-			unsigned int flags;
-#ifdef CONFIG_MIPS_MT_SMTC
-			unsigned long irqflags;
-			unsigned int mtflags;
-#endif /* CONFIG_MIPS_MT_SMTC */
-
-			preempt_disable();
-			if (!cpu_has_fpu) {
-				preempt_enable();
-				break;
-			}
-
-#ifdef CONFIG_MIPS_MT_SMTC
-			/* Read-modify-write of Status must be atomic */
-			local_irq_save(irqflags);
-			mtflags = dmt();
-#endif /* CONFIG_MIPS_MT_SMTC */
-			if (cpu_has_mipsmt) {
-				unsigned int vpflags = dvpe();
-				flags = read_c0_status();
-				__enable_fpu();
-				__asm__ __volatile__(".set push\n.set hardfloat\ncfc1\t%0,$0\n.set pop": "=r" (tmp));
-				write_c0_status(flags);
-				evpe(vpflags);
-			} else {
-				flags = read_c0_status();
-				__enable_fpu();
-				__asm__ __volatile__(".set push\n.set hardfloat\ncfc1\t%0,$0\n.set pop": "=r" (tmp));
-				write_c0_status(flags);
-			}
-#ifdef CONFIG_MIPS_MT_SMTC
-			emt(mtflags);
-			local_irq_restore(irqflags);
-#endif /* CONFIG_MIPS_MT_SMTC */
-			preempt_enable();
+		case FPC_EIR:
+			/* implementation / version register */
+			tmp = current_cpu_data.fpu_id;
 			break;
-		}
 #ifndef CONFIG_CPU_MIPSR6
 		case DSP_BASE ... DSP_BASE + 5: {
 			dspreg_t *dregs;
@@ -411,31 +360,22 @@ long arch_ptrace(struct task_struct *child, long request,
 			regs->regs[addr] = data;
 			break;
 		case FPR_BASE ... FPR_BASE + 31: {
-			fpureg_t *fregs = get_fpu_regs(child);
+			union fpureg *fregs = get_fpu_regs(child);
 
-			if (!tsk_used_math(child)) {
-				/* FP not yet used  */
-				memset(&child->thread.fpu, ~0,
-				       sizeof(child->thread.fpu));
-				child->thread.fpu.fcr31 = 0;
-			}
+			init_fp_ctx(child);
 #ifdef CONFIG_32BIT
-			/*
-			 * The odd registers are actually the high order bits
-			 * of the values stored in the even registers - unless
-			 * we're using r2k_switch.S.
-			 */
-			if (addr & 1) {
-				fregs[(addr & ~1) - FPR_BASE] &= 0xffffffff;
-				fregs[(addr & ~1) - FPR_BASE] |= ((unsigned long long) data) << 32;
-			} else {
-				fregs[addr - FPR_BASE] &= ~0xffffffffLL;
-				fregs[addr - FPR_BASE] |= data;
+			if (!test_thread_local_flags(LTIF_FPU_FR)) {
+				/*
+				 * The odd registers are actually the high
+				 * order bits of the values stored in the even
+				 * registers - unless we're using r2k_switch.S.
+				 */
+				set_fpr32(&fregs[(addr & ~1) - FPR_BASE],
+					  addr & 1, data);
+				break;
 			}
 #endif
-#ifdef CONFIG_64BIT
-			fregs[addr - FPR_BASE] = data;
-#endif
+			set_fpr64(&fregs[addr - FPR_BASE], 0, data);
 			break;
 		}
 		case PC:

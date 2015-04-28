@@ -32,11 +32,19 @@
 #define CPC_RAILDELAY_OFS       0x010
 #define CPC_RESETWIDTH_OFS      0x018
 #define CPC_REVID_OFS           0x020
+#define CPC_CLCTL_OFS           0x028
+#define CPC_PWRUP_OFS           0x030
+#define CPC_RESETST_OFS         0x040
 
 /* Local and Other Local sections registers offsets */
 #define CPC_CMD_OFS             0x000
 #define CPC_STATUS_OFS          0x008
 #define CPC_OTHER_OFS           0x010
+#define CPC_CCCTL_OFS           0x018
+#define CPC_LPACK_OFS           0x020
+#define CPC_VCRUN_OFS           0x028
+#define CPC_VCSPND_OFS          0x030
+#define CPC_RAMSLEEP_OFS        0x050
 
 /* Command and Status registers fields masks and offsets */
 

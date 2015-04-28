@@ -27,6 +27,22 @@ extern void __user *get_sigframe(struct k_sigaction *ka, struct pt_regs *regs,
 /* Check and clear pending FPU exceptions in saved CSR */
 extern int fpcsr_pending(unsigned int __user *fpcsr);
 
+static inline void __user *sc_to_extcontext(void __user *sc)
+{
+	struct ucontext __user *uc;
+
+	/*
+	 * We can just pretend the sigcontext is always embedded in a struct
+	 * ucontext here, because the offset from sigcontext to extended
+	 * context is the same in the struct sigframe case.
+	 */
+	uc = container_of(sc, struct ucontext, uc_mcontext);
+	return &uc->uc_extcontext;
+}
+
+extern int save_extcontext(void __user *buf);
+extern int restore_extcontext(void __user *buf);
+
 /* Make sure we will not lose FPU ownership */
 #ifdef CONFIG_PREEMPT
 #define lock_fpu_owner()	preempt_disable()

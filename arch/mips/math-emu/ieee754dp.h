@@ -79,4 +79,13 @@ extern ieee754dp ieee754dp_format(int, int, u64);
       return V; \
 }
 
+#define DPNORMRET3(s, e, m, name, a0, a1, a2) \
+{ \
+    ieee754dp V = ieee754dp_format(s, e, m); \
+    if(TSTX()) \
+      return ieee754dp_xcpt(V, name, a0, a1, a2); \
+    else \
+      return V; \
+}
+
 #define DPNORMRET1(s, e, m, name, a0)  DPNORMRET2(s, e, m, name, a0, a0)

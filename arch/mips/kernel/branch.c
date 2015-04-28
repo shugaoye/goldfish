@@ -516,11 +516,11 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 			bit = 0;
 			switch (insn.i_format.rs) {
 			case bc1eqz_op:
-				if (current->thread.fpu.fpr[reg] == (__u64)0)
+				if (!(get_fpr64(&current->thread.fpu.fpr[reg], 0) & (__u64)0x1))
 					bit = 1;
 				break;
 			case bc1nez_op:
-				if (current->thread.fpu.fpr[reg] != (__u64)0)
+				if (get_fpr64(&current->thread.fpu.fpr[reg], 0) & (__u64)0x1)
 					bit = 1;
 				break;
 			}
@@ -541,7 +541,7 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 #endif
 		preempt_disable();
 		if (is_fpu_owner())
-			asm volatile(".set push\n.set hardfloat\ncfc1\t%0,$31\n.set pop" : "=r" (fcr31));
+			fcr31 = fpu_get_fcr31();
 		else
 			fcr31 = current->thread.fpu.fcr31;
 		preempt_enable();

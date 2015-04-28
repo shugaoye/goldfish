@@ -97,11 +97,13 @@ int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
 		goto up_fail;
 
 	mm->context.vdso = (void *)addr;
+	mm->context.thread_flags = current_thread_info()->local_flags;
 	/* if cache aliasing - use a different cache flush later */
 	if (cpu_has_rixi && (cpu_has_dc_aliases || cpu_has_ic_aliases))
 		mm->context.vdso_vma = find_vma(mm,addr);
 
 	mips_thread_vdso(current_thread_info());
+	smp_wmb();
 up_fail:
 	up_write(&mm->mmap_sem);
 	return ret;
@@ -138,9 +140,11 @@ void arch_release_thread_info(struct thread_info *info)
 {
 	if (info->vdso_page) {
 		if (info->task->mm) {
+			preempt_disable();
 			/* any vma in mmap is used, just to get ASIDs */
 			local_flush_tlb_page(info->task->mm->mmap,(unsigned long)page_address(info->vdso_page));
 			info->task->mm->context.vdso_asid[smp_processor_id()] = 0;
+			preempt_enable();
 		}
 		__free_page(info->vdso_page);
 		info->vdso_page = NULL;

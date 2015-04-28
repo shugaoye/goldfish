@@ -52,7 +52,25 @@
  * rsp. 64-bit code, so can't be used without conditional compilation.
  * The alterantive is switching the assembler to 64-bit code which happens
  * to work right even for 32-bit code ...
+ *
+ * LY22: Bad news - new toolchain (binutils) starts producing warning
+ *       if ABI=32 for DLA, even for MIPS64. So, multiple variants.
  */
+#if defined(CONFIG_CPU_MIPSR6) && defined(CONFIG_64BIT)
+#define instruction_hazard()						\
+do {									\
+	unsigned long tmp;						\
+									\
+	__asm__ __volatile__(						\
+	"       .set    push                                    \n"     \
+	"       .set    mips64r6                                \n"     \
+	"       dla     %0, 1f                                  \n"     \
+	"	jr.hb	%0					\n"	\
+	"       .set    pop                                     \n"     \
+	"1:							\n"	\
+	: "=r" (tmp));							\
+} while (0)
+#else
 #ifdef CONFIG_CPU_MIPSR6
 #define instruction_hazard()						\
 do {									\
@@ -61,13 +79,14 @@ do {									\
 	__asm__ __volatile__(						\
 	"       .set    push                                    \n"     \
 	"       .set    mips64r6                                \n"     \
-	"	dla	%0, 1f					\n"	\
+	"       la      %0, 1f                                  \n"     \
 	"	jr.hb	%0					\n"	\
 	"       .set    pop                                     \n"     \
 	"1:							\n"	\
 	: "=r" (tmp));							\
 } while (0)
 #else /* !CONFIG_CPU_MIPSR6 */
+#ifdef CONFIG_64BIT
 #define instruction_hazard()						\
 do {									\
 	unsigned long tmp;						\
@@ -80,6 +99,21 @@ do {									\
 	"1:							\n"	\
 	: "=r" (tmp));							\
 } while (0)
+#else
+#define instruction_hazard()						\
+do {									\
+	unsigned long tmp;						\
+									\
+	__asm__ __volatile__(						\
+	"	.set	mips64r2				\n"	\
+	"       la      %0, 1f                                  \n"     \
+	"	jr.hb	%0					\n"	\
+	"	.set	mips0					\n"	\
+	"1:							\n"	\
+	: "=r" (tmp));							\
+} while (0)
+#endif
+#endif
 #endif
 
 #elif (defined(CONFIG_CPU_MIPSR1) && !defined(CONFIG_MIPS_ALCHEMY)) || \

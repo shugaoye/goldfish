@@ -46,6 +46,9 @@
 unsigned long _cpc_base;
 int cpc_present = -1;
 
+static DEFINE_PER_CPU_ALIGNED(spinlock_t, mips_cpc_lock);
+
+
 int __init cpc_probe(unsigned long defaddr, unsigned long defsize)
 {
 	if (cpc_present >= 0)
@@ -56,13 +59,13 @@ int __init cpc_probe(unsigned long defaddr, unsigned long defsize)
 		return 0;
 	}
 
-	if ((GCMPGCB(CPCST) & GCMP_GCB_CPCST_EN_MASK) == 0) {
+	if ((GCMPGCB(CPCST) & GCMP_GCB_CPCST_EN_MSK) == 0) {
 		cpc_present = 0;
 		return 0;
 	}
 
-	_cpc_base = GCMPGCB(CPCBA);
-	if (_cpc_base & GCMP_GCB_CPCBA_EN_MASK)
+	_cpc_base = GCMPGCBaddr(CPCBA);
+	if (_cpc_base & GCMP_GCB_CPCBA_EN_MSK)
 		goto success;
 
 	if (!defaddr) {
@@ -71,15 +74,15 @@ int __init cpc_probe(unsigned long defaddr, unsigned long defsize)
 	}
 
 	/* Try to setup a platform value */
-	GCMPGCB(CPCBA) = defaddr | GCMP_GCB_CPCBA_EN_MASK;
-	_cpc_base = GCMPGCB(CPCBA);
-	if ((_cpc_base & GCMP_GCB_CPCBA_EN_MASK) == 0) {
+	GCMPGCBaddrWrite(CPCBA, (defaddr | GCMP_GCB_CPCBA_EN_MSK));
+	_cpc_base = GCMPGCBaddr(CPCBA);
+	if ((_cpc_base & GCMP_GCB_CPCBA_EN_MSK) == 0) {
 		cpc_present = 0;
 		return 0;
 	}
 success:
 	pr_info("CPC available\n");
-	_cpc_base = (unsigned long) ioremap_nocache(_cpc_base & ~GCMP_GCB_CPCBA_EN_MASK, defsize);
+	_cpc_base = (unsigned long) ioremap_nocache(_cpc_base & ~GCMP_GCB_CPCBA_EN_MSK, defsize);
 	cpc_present = 1;
 	return 1;
 }
@@ -104,6 +107,17 @@ static ssize_t show_cpc_global(struct device *dev,
 		CPCGCB(RESETWIDTH),
 		CPCGCB(REVID)
 	);
+	if (gcmp3_present) {
+	n += snprintf(buf+n, PAGE_SIZE-n,
+		"CPC3 Global Clock Control \t%08x\n"
+		"CPC3 Global CM Power Up\t\t%08x\n"
+		"CPC3 Global Reset Occurred\t\t%08x\n"
+		,
+		CPCGCB(CLCTL),
+		CPCGCB(PWRUP),
+		CPCGCB(RESETST)
+	);
+	}
 
 	return n;
 }
@@ -118,20 +132,70 @@ static char *cpc_status[] = { "PwrDwn", "VddOK", "UpDelay", "UClkOff", "Reset",
 static ssize_t show_cpc_local(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
+	unsigned long irq_flags;
 	int n = 0;
 
-	CPCLCB(OTHER) = (dev->id)<<16;
+	if (gcmp3_present) {
+		unsigned int cmd, status, clkctl;
+		unsigned int lpack, vcrun, vcsuspend;
+		unsigned int ramsleep;
 
-	n += snprintf(buf+n, PAGE_SIZE-n,
-		"CPC Local Command Register\t\t\t%08x:  CMD=%s\n"
-		"CPC Local Status and Configuration register\t%08x:   Status=%s, LastCMD=%s\n"
-		"CPC Core Other Addressing Register\t\t%08x\n"
-		,
-		CPCOCB(CMD), cpc_cmd[(CPCOCB(CMD) & CPCL_CMD_MASK) >> CPCL_CMD_SH],
-		CPCOCB(STATUS), cpc_status[(CPCOCB(STATUS) & CPCL_STATUS_MASK) >> CPCL_STATUS_SH],
-			cpc_cmd[(CPCOCB(STATUS) & CPCL_CMD_MASK) >> CPCL_CMD_SH],
-		CPCOCB(OTHER)
-	);
+		local_irq_save(irq_flags);
+
+		GCMPCLCB(OTHER) = dev->id;
+
+		cmd = CPCOCB(CMD);
+		status = CPCOCB(STATUS);
+		clkctl = CPCOCB(CCCTL);
+		lpack = CPCOCB(LPACK);
+		vcrun = CPCOCB(VCRUN);
+		vcsuspend = CPCOCB(VCSPND);
+		ramsleep = CPCOCB(RAMSLEEP);
+
+		local_irq_restore(irq_flags);
+
+		n += snprintf(buf+n, PAGE_SIZE-n,
+			"CPC Local Command Register\t\t\t%08x:  CMD=%s\n"
+			"CPC Local Status and Configuration register\t%08x:   Status=%s, LastCMD=%s\n"
+			"CPC3 Local Clock Change Register\t\t%08x\n"
+			"CPC3 Local Lpack Register\t\t%x\n"
+			"CPC3 Local VC Run Register\t\t%x\n"
+			"CPC3 Local VC Suspend Register\t\t%x\n"
+			"CPC3 Local RAM Sleep Register\t\t%08x\n"
+			,
+			cmd, cpc_cmd[(cmd & CPCL_CMD_MASK) >> CPCL_CMD_SH],
+			status, cpc_status[(status & CPCL_STATUS_MASK) >> CPCL_STATUS_SH],
+				cpc_cmd[(status & CPCL_CMD_MASK) >> CPCL_CMD_SH],
+			clkctl, lpack, vcrun, vcsuspend, ramsleep
+		);
+	} else {
+		unsigned int cmd, status, other;
+		int corenum;
+
+		preempt_disable();
+		corenum = current_cpu_data.core;
+		spin_lock_irqsave(&per_cpu(mips_cpc_lock, corenum),irq_flags);
+
+		CPCLCB(OTHER) = (dev->id)<<16;
+
+		cmd = CPCOCB(CMD);
+		status = CPCOCB(STATUS);
+		other = CPCOCB(OTHER);
+
+		spin_unlock_irqrestore(&per_cpu(mips_cpc_lock, corenum),irq_flags);
+		preempt_enable();
+
+		n += snprintf(buf+n, PAGE_SIZE-n,
+			"CPC Local Command Register\t\t\t%08x:  CMD=%s\n"
+			"CPC Local Status and Configuration register\t%08x:   Status=%s, LastCMD=%s\n"
+			"CPC Core Other Addressing Register\t\t%08x\n"
+			,
+			cmd, cpc_cmd[(cmd & CPCL_CMD_MASK) >> CPCL_CMD_SH],
+			status, cpc_status[(status & CPCL_STATUS_MASK) >> CPCL_STATUS_SH],
+				cpc_cmd[(status & CPCL_CMD_MASK) >> CPCL_CMD_SH],
+			other
+		);
+	}
 
 	return n;
 }

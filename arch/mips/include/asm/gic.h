@@ -21,14 +21,18 @@
 
 #define GIC_NUM_INTRS			(24 + NR_CPUS * 2)
 
-#define MSK(n) ((1 << (n)) - 1)
+#define MSK(n) ((1UL << (n)) - 1)
 #define REG32(addr)		(*(volatile unsigned int *) (addr))
+#define REGUL(addr)             (*(volatile unsigned long *) (addr))
 #define REG(base, offs)		REG32((unsigned long)(base) + offs##_##OFS)
 #define REGP(base, phys)	REG32((unsigned long)(base) + (phys))
+#define REGA(base, phys)        REGUL((unsigned long)(base) + (phys))
 
 /* Accessors */
 #define GIC_REG(segment, offset) \
 	REG32(_gic_base + segment##_##SECTION_OFS + offset##_##OFS)
+#define GIC_REGhi(segment, offset) \
+	REG32(_gic_base + segment##_##SECTION_OFS + offset##_##OFS + 4)
 #define GIC_REG_ADDR(segment, offset) \
 	REG32(_gic_base + segment##_##SECTION_OFS + offset)
 
@@ -160,6 +164,13 @@
 #define GIC_SH_MAP_TO_VPE_REG_BIT(vpe)	(1 << ((vpe) % 32))
 
 #define GIC_DINT_OFS                    0x6000
+#define GIC_EJTAG_OFS                   0x6010
+#define GIC_DTLOW_OFS                   0x6020
+#define GIC_DTHI_OFS                    0x6028
+#define GIC_DTEXT_OFS                   0x6070
+#define GIC_DMODECONF_OFS               0x6080
+#define GIC_DINTGRP_OFS                 0x6090
+#define GIC_DMSTATUS_OFS                0x60A0
 
 /* Convert an interrupt number to a byte offset/bit for multi-word registers */
 #define GIC_INTR_OFS(intr) (((intr) / 32)*4)
@@ -212,7 +223,9 @@
 #define GIC_VPE_EIC_SS(intr) \
 	(GIC_VPE_EIC_SHADOW_SET_BASE + (4 * intr))
 
-#define GIC_VPE_EIC_VEC_BASE		0x0800
+#define GIC_VPE_GCTR_OFFSET_OFS         0x0200
+
+#define GIC_VPE_EIC_VEC_BASE            0x0800
 #define GIC_VPE_EIC_VEC(intr) \
 	(GIC_VPE_EIC_VEC_BASE + (4 * intr))
 
@@ -366,6 +379,8 @@ struct gic_shared_intr_map {
 /* Mapped interrupt to pin X, then GIC will generate the vector (X+1). */
 #define GIC_PIN_TO_VEC_OFFSET	(1)
 
+#define GIC_ID(cpu)             (cpu_data[cpu].g_vpe)
+
 #include <linux/clocksource.h>
 #include <linux/irq.h>
 
@@ -395,4 +410,5 @@ extern void gic_disable_interrupt(int irq_vec);
 extern void gic_irq_ack(struct irq_data *d);
 extern void gic_finish_irq(struct irq_data *d);
 extern void gic_platform_init(int irqs, struct irq_chip *irq_controller);
+extern void vpe_gic_setup(void);
 #endif /* _ASM_GICREGS_H */

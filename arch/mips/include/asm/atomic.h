@@ -71,7 +71,11 @@ static __inline__ void atomic_add(int i, atomic_t * v)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %2, %1                          \n"
+#else
+			"       la      %2, %1                          \n"
+#endif
 			"       ll      %0, 0(%2)       # atomic_add    \n"
 			"       addu    %0, %3                          \n"
 			"       sc      %0, 0(%2)                       \n"
@@ -128,7 +132,11 @@ static __inline__ void atomic_sub(int i, atomic_t * v)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %2, %1                          \n"
+#else
+			"       la      %2, %1                          \n"
+#endif
 			"       ll      %0, 0(%2)       # atomic_sub    \n"
 			"       subu    %0, %3                          \n"
 			"       sc      %0, 0(%2)                       \n"
@@ -186,7 +194,11 @@ static __inline__ int atomic_add_return(int i, atomic_t * v)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %3, %2                          \n"
+#else
+			"       la      %3, %2                          \n"
+#endif
 			"       ll      %1, 0(%3) # atomic_add_return   \n"
 			"       addu    %0, %1, %4                      \n"
 			"       sc      %0, 0(%3)                       \n"
@@ -253,7 +265,11 @@ static __inline__ int atomic_sub_return(int i, atomic_t * v)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %3, %2                          \n"
+#else
+			"       la      %3, %2                          \n"
+#endif
 			"       ll      %1, 0(%3) # atomic_sub_return   \n"
 			"       subu    %0, %1, %4                      \n"
 			"       sc      %0, 0(%3)                       \n"
@@ -329,7 +345,11 @@ static __inline__ int atomic_sub_if_positive(int i, atomic_t * v)
 		__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 		"       .set    mips64r6                                \n"
+#ifdef CONFIG_64BIT
 		"       dla     %3, %2                                  \n"
+#else
+		"       la      %3, %2                                  \n"
+#endif
 		"1:     ll      %1, 0(%3)      # atomic_sub_if_positive \n"
 		"       subu    %0, %1, %4                              \n"
 		"	bltz	%0, 1f					\n"
@@ -517,7 +537,11 @@ static __inline__ void atomic64_add(long i, atomic64_t * v)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %2, %1                          \n"
+#else
+			"       la      %2, %1                          \n"
+#endif
 			"       lld     %0, 0(%2)       # atomic64_add  \n"
 			"       daddu   %0, %3                          \n"
 			"       scd     %0, 0(%2)                       \n"
@@ -574,7 +598,11 @@ static __inline__ void atomic64_sub(long i, atomic64_t * v)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %2, %1                          \n"
+#else
+			"       la      %2, %1                          \n"
+#endif
 			"       lld     %0, 0(%2)       # atomic64_sub  \n"
 			"       dsubu   %0, %3                          \n"
 			"       scd     %0, 0(%2)                       \n"
@@ -632,7 +660,11 @@ static __inline__ long atomic64_add_return(long i, atomic64_t * v)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %3, %2                          \n"
+#else
+			"       la      %3, %2                          \n"
+#endif
 			"       lld     %1, 0(%3) # atomic64_add_return \n"
 			"       daddu   %0, %1, %4                      \n"
 			"       scd     %0, 0(%3)                       \n"
@@ -698,7 +730,11 @@ static __inline__ long atomic64_sub_return(long i, atomic64_t * v)
 			__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 			"       .set    mips64r6                        \n"
+#ifdef CONFIG_64BIT
 			"       dla     %3, %2                          \n"
+#else
+			"       la      %3, %2                          \n"
+#endif
 			"       lld     %1, 0(%3) # atomic64_sub_return \n"
 			"       dsubu   %0, %1, %4                      \n"
 			"       scd     %0, 0(%3)                       \n"
@@ -775,7 +811,11 @@ static __inline__ long atomic64_sub_if_positive(long i, atomic64_t * v)
 		__asm__ __volatile__(
 #ifdef CONFIG_CPU_MIPSR6
 		"       .set    mips64r6                                \n"
+#ifdef CONFIG_64BIT
 		"       dla     %3, %2                                  \n"
+#else
+		"       la      %3, %2                                  \n"
+#endif
 		"1:     lld     %1, 0(%3)    # atomic64_sub_if_positive \n"
 		"       dsubu   %0, %1, %4                              \n"
 		"	bltz	%0, 1f					\n"

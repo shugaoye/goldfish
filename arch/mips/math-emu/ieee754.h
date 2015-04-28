@@ -104,6 +104,7 @@ typedef union _ieee754sp {
 */
 int ieee754sp_finite(ieee754sp x);
 int ieee754sp_class(ieee754sp x);
+int ieee754_2008sp_class(ieee754sp x);
 
 ieee754sp ieee754sp_abs(ieee754sp x);
 ieee754sp ieee754sp_neg(ieee754sp x);
@@ -123,6 +124,12 @@ ieee754sp ieee754sp_funs(unsigned x);
 ieee754sp ieee754sp_flong(s64 x);
 ieee754sp ieee754sp_fulong(u64 x);
 ieee754sp ieee754sp_fdp(ieee754dp x);
+ieee754sp ieee754sp_maddf(ieee754sp z, ieee754sp x, ieee754sp y);
+ieee754sp ieee754sp_msubf(ieee754sp z, ieee754sp x, ieee754sp y);
+ieee754sp ieee754sp_fmin(ieee754sp x, ieee754sp y);
+ieee754sp ieee754sp_fmina(ieee754sp x, ieee754sp y);
+ieee754sp ieee754sp_fmax(ieee754sp x, ieee754sp y);
+ieee754sp ieee754sp_fmaxa(ieee754sp x, ieee754sp y);
 
 int ieee754sp_tint(ieee754sp x);
 unsigned int ieee754sp_tuns(ieee754sp x);
@@ -148,6 +155,7 @@ ieee754sp ieee754sp_sqrt(ieee754sp x);
 */
 int ieee754dp_finite(ieee754dp x);
 int ieee754dp_class(ieee754dp x);
+int ieee754_2008dp_class(ieee754dp x);
 
 /* x with sign of y */
 ieee754dp ieee754dp_copysign(ieee754dp x, ieee754dp y);
@@ -174,6 +182,12 @@ ieee754dp ieee754dp_fsp(ieee754sp x);
 ieee754dp ieee754dp_ceil(ieee754dp x);
 ieee754dp ieee754dp_floor(ieee754dp x);
 ieee754dp ieee754dp_trunc(ieee754dp x);
+ieee754dp ieee754dp_maddf(ieee754dp z, ieee754dp x, ieee754dp y);
+ieee754dp ieee754dp_msubf(ieee754dp z, ieee754dp x, ieee754dp y);
+ieee754dp ieee754dp_fmin(ieee754dp x, ieee754dp y);
+ieee754dp ieee754dp_fmina(ieee754dp x, ieee754dp y);
+ieee754dp ieee754dp_fmax(ieee754dp x, ieee754dp y);
+ieee754dp ieee754dp_fmaxa(ieee754dp x, ieee754dp y);
 
 int ieee754dp_tint(ieee754dp x);
 unsigned int ieee754dp_tuns(ieee754dp x);

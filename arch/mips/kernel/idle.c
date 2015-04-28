@@ -198,6 +198,7 @@ void __init check_wait(void)
 		break;
 
 	case CPU_TX49XX:
+	case CPU_SAMURAI:
 		cpu_wait = r4k_wait_irqoff;
 		break;
 	case CPU_ALCHEMY:

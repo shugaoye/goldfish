@@ -6,6 +6,7 @@
  * Copyright (C) 1996, 99 Ralf Baechle
  * Copyright (C) 2000, 2002  Maciej W. Rozycki
  * Copyright (C) 1990, 1999 by Silicon Graphics, Inc.
+ * Copyright (C) 2015 Imagination Technologies
  */
 #ifndef _ASM_ADDRSPACE_H
 #define _ASM_ADDRSPACE_H
@@ -130,6 +131,13 @@
 #define XKPHYS_TO_PHYS(p)		((p) & TO_PHYS_MASK)
 #define PHYS_TO_XKPHYS(cm, a)		(_CONST64_(0x8000000000000000) | \
 					 (_CONST64_(cm) << 59) | (a))
+#ifndef CAC_BASE
+#ifndef __ASSEMBLY__
+extern unsigned int mips_cca;
+#define CAC_BASE                        (_CONST64_(0x8000000000000000) | \
+					 (_ACAST64_(mips_cca) << 59))
+#endif
+#endif
 
 /*
  * The ultimate limited of the 64-bit MIPS architecture:  2 bits for selecting

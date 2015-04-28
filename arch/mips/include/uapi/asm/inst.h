@@ -48,6 +48,7 @@ enum major_op {
 	scd_op, sdc1_op, jump2_op, sd_op
 #endif
 };
+#define msa_op  mdmx_op
 
 /*
  * func field of spec opcode.
@@ -177,9 +178,15 @@ enum cop1_sdw_func {
 	fceill_op    =	0x0a, ffloorl_op   =  0x0b,
 	fround_op    =	0x0c, ftrunc_op	   =  0x0d,
 	fceil_op     =	0x0e, ffloor_op	   =  0x0f,
+	fsel_op      =  0x10,
 	fmovc_op     =	0x11, fmovz_op	   =  0x12,
 	fmovn_op     =	0x13, frecip_op	   =  0x15,
-	frsqrt_op    =	0x16, fcvts_op	   =  0x20,
+	frsqrt_op    =  0x16,
+	fmaddf_op    =  0x18, fmsubf_op    =  0x19,
+	frint_op     =  0x1a, fclass_op    =  0x1b,
+	fmin_op      =  0x1c, fmina_op     =  0x1d,
+	fmax_op      =  0x1e, fmaxa_op     =  0x1f,
+	fcvts_op     =  0x20,
 	fcvtd_op     =	0x21, fcvte_op	   =  0x22,
 	fcvtw_op     =	0x24, fcvtl_op	   =  0x25,
 	fcmp_op	     =	0x30
@@ -219,6 +226,14 @@ enum lx_func {
 	lwux_op = 0x10,
 	lhux_op = 0x14,
 	lbx_op	= 0x16,
+};
+
+/*
+ * func field for MSA MI10 format
+ */
+enum msa_mi10_func {
+	msa_ld_op = 8,
+	msa_st_op = 9,
 };
 
 /*
@@ -625,6 +640,17 @@ struct v_format {				/* MDMX vector format */
 	;)))))))
 };
 
+struct msa_mi10_format {        /* MSA */
+	BITFIELD_FIELD(unsigned int opcode : 6,
+	BITFIELD_FIELD(signed int s10 : 10,
+	BITFIELD_FIELD(unsigned int rs : 5,
+	BITFIELD_FIELD(unsigned int wd : 5,
+	BITFIELD_FIELD(unsigned int func : 4,
+	BITFIELD_FIELD(unsigned int df : 2,
+	;))))))
+};
+
+
 /*
  * microMIPS instruction formats (32-bit length)
  *
@@ -894,6 +920,7 @@ union mips_instruction {
 	struct spec3_format spec3_format;
 	struct f_format f_format;
 	struct ma_format ma_format;
+	struct msa_mi10_format msa_mi10_format;
 	struct b_format b_format;
 	struct ps_format ps_format;
 	struct v_format v_format;

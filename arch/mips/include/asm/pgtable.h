@@ -10,6 +10,7 @@
 
 #include <linux/mm_types.h>
 #include <linux/mmzone.h>
+#include <linux/smp.h>
 #ifdef CONFIG_32BIT
 #include <asm/pgtable-32.h>
 #endif
@@ -95,6 +96,27 @@ extern void paging_init(void);
 
 #define pmd_page_vaddr(pmd)	pmd_val(pmd)
 
+#define htw_stop()							\
+do {									\
+	if (cpu_has_htw) {                                              \
+		raw_current_cpu_data.htw_level++;                       \
+		write_c0_pwctl(HTW_PWCTL_BASE &                         \
+			       ~(1 << MIPS_PWCTL_PWEN_SHIFT));		\
+		back_to_back_c0_hazard();                               \
+	}                                                               \
+} while(0)
+
+#define htw_start()							\
+do {									\
+	if (cpu_has_htw) {                                              \
+		if (!--raw_current_cpu_data.htw_level) {                \
+			write_c0_pwctl(HTW_PWCTL_BASE |                 \
+				       (1 << MIPS_PWCTL_PWEN_SHIFT));   \
+			back_to_back_c0_hazard();                       \
+		}                                                       \
+	}                                                               \
+} while(0)
+
 #if defined(CONFIG_64BIT_PHYS_ADDR) && defined(CONFIG_CPU_MIPS32)
 
 #define pte_none(pte)		(!(((pte).pte_low | (pte).pte_high) & ~_PAGE_GLOBAL))
@@ -123,12 +145,17 @@ static inline void set_pte(pte_t *ptep, pte_t pte)
 static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 {
 	pte_t null = __pte(0);
+	unsigned long flags;
 
+	local_irq_save(flags);
+	htw_stop();
 	/* Preserve global status for the pair */
 	if (ptep_buddy(ptep)->pte_low & _PAGE_GLOBAL)
 		null.pte_low = null.pte_high = _PAGE_GLOBAL;
 
 	set_pte_at(mm, addr, ptep, null);
+	htw_start();
+	local_irq_restore(flags);
 }
 #else
 
@@ -159,6 +186,10 @@ static inline void set_pte(pte_t *ptep, pte_t pteval)
 
 static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 {
+	unsigned long flags;
+
+	local_irq_save(flags);
+	htw_stop();
 #if !defined(CONFIG_CPU_R3000) && !defined(CONFIG_CPU_TX39XX)
 	/* Preserve global status for the pair */
 	if (pte_val(*ptep_buddy(ptep)) & _PAGE_GLOBAL)
@@ -166,6 +197,8 @@ static inline void pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *pt
 	else
 #endif
 		set_pte_at(mm, addr, ptep, __pte(0));
+	htw_start();
+	local_irq_restore(flags);
 }
 #endif
 

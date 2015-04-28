@@ -88,6 +88,7 @@ void local_flush_tlb_all(void)
 	int wired;
 
 	ENTER_CRITICAL(flags);
+	htw_stop();
 	/* Save old context and create impossible VPN2 value */
 	old_ctx = read_c0_entryhi();
 	write_c0_entrylo0(0);
@@ -140,6 +141,7 @@ void local_flush_tlb_all(void)
 	tlbw_use_hazard();
 	write_c0_entryhi(old_ctx);
 	mtc0_tlbw_hazard();
+	htw_start();
 	FLUSH_ITLB;
 	EXIT_CRITICAL(flags);
 }
@@ -166,20 +168,23 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 	unsigned long end)
 {
 	struct mm_struct *mm = vma->vm_mm;
-	int cpu = smp_processor_id();
+	unsigned long size, flags;
+	int cpu;
 
+	ENTER_CRITICAL(flags);
+	cpu = smp_processor_id();
 	if (cpu_context(cpu, mm) != 0) {
-		unsigned long size, flags;
-
-		ENTER_CRITICAL(flags);
 		start = round_down(start, PAGE_SIZE << 1);
 		end = round_up(end, PAGE_SIZE << 1);
 		size = (end - start) >> (PAGE_SHIFT + 1);
 		if ((current_cpu_data.tlbsizeftlbsets && (size <= current_cpu_data.tlbsize/8)) ||
 		    ((!current_cpu_data.tlbsizeftlbsets) && (size <= current_cpu_data.tlbsize/2))) {
-			int oldpid = read_c0_entryhi();
-			int newpid = cpu_asid(cpu, mm);
+			int oldpid;
+			int newpid;
 
+			htw_stop();
+			oldpid = read_c0_entryhi();
+			newpid = cpu_asid(cpu, mm);
 			while (start < end) {
 				int idx;
 
@@ -200,12 +205,14 @@ void local_flush_tlb_range(struct vm_area_struct *vma, unsigned long start,
 			}
 			tlbw_use_hazard();
 			write_c0_entryhi(oldpid);
+			mtc0_tlbw_hazard();
+			htw_start();
 		} else {
 			drop_mmu_context(mm, cpu);
 		}
 		FLUSH_ITLB;
-		EXIT_CRITICAL(flags);
 	}
+	EXIT_CRITICAL(flags);
 }
 
 void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
@@ -217,7 +224,10 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 	size = (size + 1) >> 1;
 	if ((current_cpu_data.tlbsizeftlbsets && (size <= current_cpu_data.tlbsize/8)) ||
 	    ((!current_cpu_data.tlbsizeftlbsets) && (size <= current_cpu_data.tlbsize/2))) {
-		int pid = read_c0_entryhi();
+		int pid;
+
+		htw_stop();
+		pid = read_c0_entryhi();
 
 		start &= (PAGE_MASK << 1);
 		end += ((PAGE_SIZE << 1) - 1);
@@ -243,6 +253,8 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 		}
 		tlbw_use_hazard();
 		write_c0_entryhi(pid);
+		mtc0_tlbw_hazard();
+		htw_start();
 	} else {
 		local_flush_tlb_all();
 	}
@@ -252,15 +264,17 @@ void local_flush_tlb_kernel_range(unsigned long start, unsigned long end)
 
 void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 {
-	int cpu = smp_processor_id();
+	unsigned long flags;
+	int cpu;
 
+	ENTER_CRITICAL(flags);
+	cpu = smp_processor_id();
 	if (cpu_context(cpu, vma->vm_mm) != 0) {
-		unsigned long flags;
 		int oldpid, newpid, idx;
 
 		newpid = cpu_asid(cpu, vma->vm_mm);
 		page &= (PAGE_MASK << 1);
-		ENTER_CRITICAL(flags);
+		htw_stop();
 		oldpid = read_c0_entryhi();
 		write_c0_entryhi(page | newpid);
 		mtc0_tlbw_hazard();
@@ -279,9 +293,11 @@ void local_flush_tlb_page(struct vm_area_struct *vma, unsigned long page)
 
 	finish:
 		write_c0_entryhi(oldpid);
+		mtc0_tlbw_hazard();
+		htw_start();
 		FLUSH_ITLB_VM(vma);
-		EXIT_CRITICAL(flags);
 	}
+	EXIT_CRITICAL(flags);
 }
 
 /*
@@ -294,6 +310,7 @@ void local_flush_tlb_one(unsigned long page)
 	int oldpid, idx;
 
 	ENTER_CRITICAL(flags);
+	htw_stop();
 	oldpid = read_c0_entryhi();
 	page &= (PAGE_MASK << 1);
 	write_c0_entryhi(page);
@@ -311,6 +328,8 @@ void local_flush_tlb_one(unsigned long page)
 		tlbw_use_hazard();
 	}
 	write_c0_entryhi(oldpid);
+	mtc0_tlbw_hazard();
+	htw_start();
 	FLUSH_ITLB;
 	EXIT_CRITICAL(flags);
 }
@@ -336,7 +355,9 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 		return;
 
 	ENTER_CRITICAL(flags);
+	htw_stop();
 
+	/* no needs to save-restore EntryHi - ASID is preserved */
 	pid = read_c0_entryhi() & ASID_MASK;
 	address &= (PAGE_MASK << 1);
 	write_c0_entryhi(address | pid);
@@ -384,6 +405,7 @@ void __update_tlb(struct vm_area_struct * vma, unsigned long address, pte_t pte)
 			tlb_write_indexed();
 	}
 	tlbw_use_hazard();
+	htw_start();
 	FLUSH_ITLB_VM(vma);
 	EXIT_CRITICAL(flags);
 }
@@ -425,6 +447,8 @@ int install_vdso_tlb(void)
 
 	local_irq_save(flags);
 	cpu = smp_processor_id();
+	htw_stop();
+	/* no needs to save-restore EntryHi - ASID is preserved */
 	write_c0_entryhi(((unsigned long)current->mm->context.vdso & (PAGE_MASK << 1)) |
 			 cpu_asid(cpu, current->mm));
 
@@ -451,6 +475,7 @@ int install_vdso_tlb(void)
 
 	current->mm->context.vdso_asid[cpu] = cpu_asid(cpu, current->mm);
 	current->mm->context.vdso_page[cpu] = current_thread_info()->vdso_page;
+	htw_start();
 	local_irq_restore(flags);
 
 	return(1);
@@ -466,6 +491,7 @@ void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 
 	ENTER_CRITICAL(flags);
 	/* Save old context and create impossible VPN2 value */
+	htw_stop();
 	old_ctx = read_c0_entryhi();
 	old_pagemask = read_c0_pagemask();
 	wired = read_c0_wired() & 0xffff;
@@ -484,6 +510,7 @@ void add_wired_entry(unsigned long entrylo0, unsigned long entrylo1,
 	write_c0_entryhi(old_ctx);
 	write_c0_pagemask(old_pagemask);
 	mtc0_tlbw_hazard();
+	htw_start();
 	EXIT_CRITICAL(flags);
 }
 
@@ -495,6 +522,7 @@ void remove_wired_entry(void)
 	unsigned long old_ctx;
 
 	ENTER_CRITICAL(flags);
+	htw_stop();
 	/* Save old context and create impossible VPN2 value */
 	old_ctx = read_c0_entryhi();
 	old_pagemask = read_c0_pagemask();
@@ -513,6 +541,7 @@ void remove_wired_entry(void)
 	write_c0_entryhi(old_ctx);
 	write_c0_pagemask(old_pagemask);
 	mtc0_tlbw_hazard();
+	htw_start();
 	EXIT_CRITICAL(flags);
 }
 
@@ -524,12 +553,14 @@ int __init has_transparent_hugepage(void)
 	unsigned long flags;
 
 	ENTER_CRITICAL(flags);
+	htw_stop();
 	write_c0_pagemask(PM_HUGE_MASK);
 	back_to_back_c0_hazard();
 	mask = read_c0_pagemask();
 	write_c0_pagemask(PM_DEFAULT_MASK);
 	mtc0_tlbw_hazard();
 
+	htw_start();
 	EXIT_CRITICAL(flags);
 
 	return mask == PM_HUGE_MASK;
@@ -571,7 +602,7 @@ void __cpuinit tlb_init(void)
 #ifdef CONFIG_64BIT
 		pg |= PG_ELPA;
 #endif
-		write_c0_pagegrain(pg);
+		write_c0_pagegrain(pg | read_c0_pagegrain());
 	}
 	mtc0_tlbw_hazard();
 

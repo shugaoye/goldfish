@@ -36,6 +36,7 @@
 #include <asm/cacheflush.h> /* for run_uncached() */
 #include <asm/traps.h>
 #include <asm/dma-coherence.h>
+#include <asm/gcmpregs.h>
 
 /*
  * Special Variant of smp_call_function for use by cache functions:
@@ -455,6 +456,8 @@ static inline void local_r4k___flush_cache_all(void * args)
 	return;
 #endif
 	r4k_blast_dcache();
+	if (!cpu_has_ic_fills_f_dc)
+		mb();
 	r4k_blast_icache();
 
 	switch (current_cpu_type()) {
@@ -509,6 +512,9 @@ static void r4k__flush_cache_vmap(unsigned long start, unsigned long end)
 {
 	unsigned long size = end - start;
 
+	if (cpu_has_cm3_inclusive_pcaches)
+		return;
+
 	if (cpu_has_safe_index_cacheops && size >= dcache_size) {
 		r4k_blast_dcache();
 	} else {
@@ -533,6 +539,9 @@ static void r4k__flush_cache_vmap(unsigned long start, unsigned long end)
 static void r4k__flush_cache_vunmap(unsigned long start, unsigned long end)
 {
 	unsigned long size = end - start;
+
+	if (cpu_has_cm3_inclusive_pcaches)
+		return;
 
 	if (cpu_has_safe_index_cacheops && size >= dcache_size)
 		r4k_blast_dcache();
@@ -564,10 +573,11 @@ static inline void local_r4k_flush_cache_range(void * args)
 	if (!(has_valid_asid(vma->vm_mm)))
 		return;
 
-	r4k_blast_dcache();
+	if (!cpu_has_cm3_inclusive_pcaches)
+		r4k_blast_dcache();
 	if (exec) {
-		if (!cpu_has_ic_fills_f_dc)
-			wmb();
+		if ((!cpu_has_cm3_inclusive_pcaches) && !cpu_has_ic_fills_f_dc)
+			mb();
 		r4k_blast_icache();
 	}
 }
@@ -661,14 +671,19 @@ static inline void local_r4k_flush_cache_page(void *args)
 
 	if ((mm == current->active_mm) && (pte_val(*ptep) & _PAGE_VALID)) {
 		if (cpu_has_dc_aliases || (exec && !cpu_has_ic_fills_f_dc)) {
-			r4k_blast_dcache_user_page(addr);
-			if (exec && (!cpu_has_cm2) && !cpu_has_ic_fills_f_dc)
-				wmb();
+			if (!cpu_has_cm3_inclusive_pcaches) {
+				r4k_blast_dcache_user_page(addr);
+				if (exec && (!cpu_has_cm2) && !cpu_has_ic_fills_f_dc)
+					mb();
+			}
 			if (exec && !cpu_icache_snoops_remote_store)
 				r4k_blast_scache_page(addr);
 		}
-		if (exec)
+		if (exec) {
 			r4k_blast_icache_user_page(addr);
+			if (gcmp_present)
+				mb();
+		}
 	} else {
 		/*
 		 * Use kmap_coherent or kmap_atomic to do flushes for
@@ -683,9 +698,11 @@ static inline void local_r4k_flush_cache_page(void *args)
 		addr = (unsigned long)vaddr;
 
 		if (cpu_has_dc_aliases || (exec && !cpu_has_ic_fills_f_dc)) {
-			r4k_blast_dcache_page(addr);
-			if (exec && (!cpu_has_cm2) && !cpu_has_ic_fills_f_dc)
-				wmb();
+			if (!cpu_has_cm3_inclusive_pcaches) {
+				r4k_blast_dcache_page(addr);
+				if (exec && (!cpu_has_cm2) && !cpu_has_ic_fills_f_dc)
+					mb();
+			}
 			if (exec && !cpu_icache_snoops_remote_store)
 				r4k_blast_scache_page(addr);
 		}
@@ -697,8 +714,11 @@ static inline void local_r4k_flush_cache_page(void *args)
 					drop_mmu_context(mm, cpu);
 				dontflash = 1;
 			} else
-				if (map_coherent || !cpu_has_ic_aliases)
+				if (map_coherent || !cpu_has_ic_aliases) {
 					r4k_blast_icache_page(addr);
+					if (gcmp_present)
+						mb();
+				}
 		}
 
 		if (map_coherent)
@@ -710,6 +730,8 @@ static inline void local_r4k_flush_cache_page(void *args)
 		if (exec && cpu_has_ic_aliases && (!dontflash) && !map_coherent) {
 			vaddr = kmap_coherent(page, addr);
 			r4k_blast_icache_page((unsigned long)vaddr);
+			if (gcmp_present)
+				mb();
 			kunmap_coherent();
 		}
 	}
@@ -736,6 +758,9 @@ static inline void local_r4k_flush_data_cache_page(void * addr)
 
 static void r4k_flush_data_cache_page(unsigned long addr)
 {
+	if (cpu_has_cm3_inclusive_pcaches)
+		return;
+
 	if (in_atomic())
 		local_r4k_flush_data_cache_page((void *)addr);
 	else
@@ -758,15 +783,18 @@ static inline void local_r4k_mips_flush_data_cache_range(void *args)
 	unsigned long len = f_args->len;
 	struct vm_area_struct * vma = f_args->vma;
 
-	blast_dcache_range(start, start + len);
+	if (!cpu_has_cm3_inclusive_pcaches)
+		blast_dcache_range(start, start + len);
 
 	if ((vma->vm_flags & VM_EXEC) && !cpu_has_ic_fills_f_dc) {
-		if (!cpu_has_cm2)
-			wmb();
+		if ((!cpu_has_cm3_inclusive_pcaches) && !cpu_has_cm2)
+			mb();
 
 		/* vma is given for exec check only, mmap is current,
 		   so - no non-current vma page flush, just user or kernel */
 		protected_blast_icache_range(vaddr, vaddr + len);
+		if (gcmp_present)
+			mb();
 	}
 }
 
@@ -777,6 +805,10 @@ static void r4k_mips_flush_data_cache_range(struct vm_area_struct *vma,
 	unsigned long len)
 {
 	struct mips_flush_data_cache_range_args args;
+
+	if (cpu_has_cm3_inclusive_pcaches && (cpu_has_ic_fills_f_dc ||
+	    !(vma->vm_flags & VM_EXEC)))
+		return;
 
 	args.vma = vma;
 	args.vaddr = vaddr;
@@ -794,13 +826,14 @@ struct flush_icache_range_args {
 
 static inline void local_r4k_flush_icache(void *args)
 {
-	if (!cpu_has_ic_fills_f_dc) {
+	if ((!cpu_has_ic_fills_f_dc) && !cpu_has_cm3_inclusive_pcaches) {
 		r4k_blast_dcache();
-
-		wmb();
+		mb();
 	}
 
 	r4k_blast_icache();
+	if (gcmp_present)
+		mb();
 }
 
 static inline void local_r4k_flush_icache_range_ipi(void *args)
@@ -809,30 +842,30 @@ static inline void local_r4k_flush_icache_range_ipi(void *args)
 	unsigned long start = fir_args->start;
 	unsigned long end = fir_args->end;
 
-	if (!cpu_has_ic_fills_f_dc) {
+	if ((!cpu_has_ic_fills_f_dc) && !cpu_has_cm3_inclusive_pcaches) {
 		R4600_HIT_CACHEOP_WAR_IMPL;
 		protected_blast_dcache_range(start, end);
 
 		if (!cpu_has_cm2)
-			wmb();
+			mb();
 	}
 
 	protected_blast_icache_range(start, end);
-
+	if (gcmp_present)
+		mb();
 }
 
 /* This function is used only for local CPU only while boot etc */
 static inline void local_r4k_flush_icache_range(unsigned long start, unsigned long end)
 {
-	if (!cpu_has_ic_fills_f_dc) {
+	if ((!cpu_has_ic_fills_f_dc) && !cpu_has_cm3_inclusive_pcaches) {
 		if (end - start >= dcache_size) {
 			r4k_blast_dcache();
 		} else {
 			R4600_HIT_CACHEOP_WAR_IMPL;
 			blast_dcache_range(start, end);
 		}
-
-		wmb();
+		mb();
 	}
 
 	if (end - start > icache_size)
@@ -844,8 +877,8 @@ static inline void local_r4k_flush_icache_range(unsigned long start, unsigned lo
 	   It is used only during boot, so - it doesn't create an impact on
 	   performance. LY22 */
 	bc_wback_inv(start, (end - start));
-	__sync();
 #endif
+	__sync();
 }
 
 /* this function can be called for kernel OR user addresses,
@@ -899,11 +932,13 @@ static void r4k_dma_cache_wback_inv(unsigned long addr, unsigned long size)
 	 * subset property so we have to flush the primary caches
 	 * explicitly
 	 */
-	if (cpu_has_safe_index_cacheops && size >= dcache_size) {
-		r4k_blast_dcache();
-	} else {
-		R4600_HIT_CACHEOP_WAR_IMPL;
-		blast_dcache_range(addr, addr + size);
+	if (!cpu_has_cm3_inclusive_pcaches) {
+		if (cpu_has_safe_index_cacheops && size >= dcache_size) {
+			r4k_blast_dcache();
+		} else {
+			R4600_HIT_CACHEOP_WAR_IMPL;
+			blast_dcache_range(addr, addr + size);
+		}
 	}
 	preempt_enable();
 
@@ -937,11 +972,13 @@ static void r4k_dma_cache_inv(unsigned long addr, unsigned long size)
 		return;
 	}
 
-	if (cpu_has_safe_index_cacheops && size >= dcache_size) {
-		r4k_blast_dcache();
-	} else {
-		R4600_HIT_CACHEOP_WAR_IMPL;
-		blast_inv_dcache_range(addr, addr + size);
+	if (!cpu_has_cm3_inclusive_pcaches) {
+		if (cpu_has_safe_index_cacheops && size >= dcache_size) {
+			r4k_blast_dcache();
+		} else {
+			R4600_HIT_CACHEOP_WAR_IMPL;
+			blast_inv_dcache_range(addr, addr + size);
+		}
 	}
 	preempt_enable();
 
@@ -962,7 +999,7 @@ static void local_r4k_flush_cache_sigtramp(void * arg)
 
 	__asm__ __volatile__(
 		"synci  0(%0)       \n"
-		"sync               \n"
+		"sync   0x10        \n" /* SYNC MB */
 		::"r"(addr):"memory");
 }
 #else
@@ -1041,6 +1078,9 @@ static void r4k_flush_kernel_vmap_range(unsigned long vaddr, int size)
 {
 	struct flush_kernel_vmap_range_args args;
 
+	if (cpu_has_cm3_inclusive_pcaches)
+		return;
+
 	args.vaddr = (unsigned long) vaddr;
 	args.size = size;
 
@@ -1112,7 +1152,11 @@ static inline void alias_74k_erratum(struct cpuinfo_mips *c)
 }
 
 static char *way_string[] __cpuinitdata = { NULL, "direct mapped", "2-way",
-	"3-way", "4-way", "5-way", "6-way", "7-way", "8-way"
+	"3-way", "4-way", "5-way", "6-way", "7-way", "8-way",
+	"9-way", "10-way", "11-way", "12-way", "13-way", "14-way", "15-way",
+	"16-way", "17-way", "18-way", "19-way", "20-way", "21-way", "22-way",
+	"23-way", "24-way", "25-way", "26-way", "27-way", "28-way", "29-way",
+	"30-way", "31-way", "32-way"
 };
 
 static void __cpuinit probe_pcache(void)
@@ -1383,6 +1427,7 @@ static void __cpuinit probe_pcache(void)
 	case CPU_INTERAPTIV:
 	case CPU_VIRTUOSO:
 	case CPU_P5600:
+	case CPU_SAMURAI:
 		if (c->cputype == CPU_74K)
 			alias_74k_erratum(c);
 		if (!(read_c0_config7() & MIPS_CONF7_IAR)) {
@@ -1662,7 +1707,7 @@ static void nxp_pr4450_fixup_config(void)
 	NXP_BARRIER();
 }
 
-unsigned int mips_cca = -1;
+unsigned int mips_cca = INT_MIN | K_CALG_NONCOHERENT;
 
 static int __init cca_setup(char *str)
 {

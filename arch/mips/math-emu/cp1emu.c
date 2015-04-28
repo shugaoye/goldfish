@@ -561,7 +561,7 @@ int mm_isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		case mm_bc1t_op:
 			preempt_disable();
 			if (is_fpu_owner())
-				asm volatile(".set push\n.set hardfloat\ncfc1\t%0,$31\n.set pop" : "=r" (fcr31));
+				fcr31 = fpu_get_fcr31();
 			else
 				fcr31 = current->thread.fpu.fcr31;
 			preempt_enable();
@@ -949,11 +949,11 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			bit = 0;
 			switch (insn.i_format.rs) {
 			case bc1eqz_op:
-				if (current->thread.fpu.fpr[reg] == (__u64)0)
+				if (!(get_fpr64(&current->thread.fpu.fpr[reg], 0) & (__u64)0x1))
 					bit = 1;
 				break;
 			case bc1nez_op:
-				if (current->thread.fpu.fpr[reg] != (__u64)0)
+				if (get_fpr64(&current->thread.fpu.fpr[reg], 0) & (__u64)0x1)
 					bit = 1;
 				break;
 			}
@@ -968,17 +968,18 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			return 1;
 			break;
 		}
-
-		if (!mipsr2_emulation)
-			break;
 #endif
 	case cop0_op:
 	case cop2_op:
 	case cop1x_op:
+#ifdef CONFIG_CPU_MIPSR6
+		if (!mipsr2_emulation)
+			break;
+#endif
 		if (insn.i_format.rs == rs_bc_op) {
 			preempt_disable();
 			if (is_fpu_owner())
-				asm volatile(".set push\n.set hardfloat\ncfc1\t%0,$31\n.set pop" : "=r" (fcr31));
+				fcr31 = fpu_get_fcr31();
 			else
 				fcr31 = current->thread.fpu.fcr31;
 			preempt_enable();
@@ -1014,6 +1015,32 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			}
 		}
 		break;
+
+#ifdef CONFIG_CPU_MIPSR6
+	case bc_op:
+		break;
+
+	case jump_op:
+		if (insn.i_format.rs) { /* beqzc */
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				dec_insn.next_pc_inc;
+			return 1;
+		}
+		break;
+
+	case balc_op:
+		break;
+
+	case jump2_op:
+		if (insn.i_format.rs) { /* bnezc */
+			*contpc = regs->cp0_epc +
+				dec_insn.pc_inc +
+				dec_insn.next_pc_inc;
+			return 1;
+		}
+		break;
+#endif
 	}
 	return 0;
 }
@@ -1030,28 +1057,51 @@ static int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
  */
 static inline int cop1_64bit(struct pt_regs *xcp)
 {
-	return !test_thread_flag(TIF_32BIT_REGS);
+	return test_thread_local_flags(LTIF_FPU_FR);
 }
 
-#define SIFROMREG(si, x) ((si) = cop1_64bit(xcp) || !(x & 1) ? \
-			(int)ctx->fpr[x] : (int)(ctx->fpr[x & ~1] >> 32))
+#define SIFROMREG(si, x) do {						\
+	if (cop1_64bit(xcp))						\
+		(si) = (int)get_fpr32(&ctx->fpr[x], 0);			\
+	else								\
+		(si) = (int)get_fpr32(&ctx->fpr[(x) & ~1], (x) & 1);	\
+} while (0)
 
-#define SITOREG(si, x)	(ctx->fpr[x & ~(cop1_64bit(xcp) == 0)] = \
-			cop1_64bit(xcp) || !(x & 1) ? \
-			ctx->fpr[x & ~1] >> 32 << 32 | (u32)(si) : \
-			ctx->fpr[x & ~1] << 32 >> 32 | (u64)(si) << 32)
+#define SITOREG(si, x) do {						\
+	if (cop1_64bit(xcp)) {						\
+		unsigned i;						\
+		set_fpr32(&ctx->fpr[x], 0, si);				\
+		for (i = 1; i < ARRAY_SIZE(ctx->fpr[x].val32); i++)	\
+			set_fpr32(&ctx->fpr[x], i, 0);			\
+	} else {							\
+		set_fpr32(&ctx->fpr[(x) & ~1], (x) & 1, si);		\
+	}								\
+} while (0)
 
-#define DIFROMREG(di, x) ((di) = ctx->fpr[x & ~(cop1_64bit(xcp) == 0)])
-#define DITOREG(di, x)	(ctx->fpr[x & ~(cop1_64bit(xcp) == 0)] = (di))
+#define SIFROMHREG(si, x)	((si) = (int)get_fpr32(&ctx->fpr[x], 1))
+
+#define SITOHREG(si, x) do {						\
+	unsigned i;							\
+	set_fpr32(&ctx->fpr[x], 1, si);					\
+	for (i = 2; i < ARRAY_SIZE(ctx->fpr[x].val32); i++)		\
+		set_fpr32(&ctx->fpr[x], i, 0);				\
+} while (0)
+
+#define DIFROMREG(di, x) \
+	((di) = get_fpr64(&ctx->fpr[(x) & ~(cop1_64bit(xcp) == 0)], 0))
+
+#define DITOREG(di, x) do {						\
+	unsigned fpr, i;						\
+	fpr = (x) & ~(cop1_64bit(xcp) == 0);				\
+	set_fpr64(&ctx->fpr[fpr], 0, di);				\
+	for (i = 1; i < ARRAY_SIZE(ctx->fpr[x].val64); i++)		\
+		set_fpr64(&ctx->fpr[fpr], i, 0);			\
+} while (0)
 
 #define SPFROMREG(sp, x) SIFROMREG((sp).bits, x)
 #define SPTOREG(sp, x)	SITOREG((sp).bits, x)
 #define DPFROMREG(dp, x)	DIFROMREG((dp).bits, x)
 #define DPTOREG(dp, x)	DITOREG((dp).bits, x)
-
-#define SIFROMHREG(si, x)	((si) = (int)(ctx->fpr[x] >> 32))
-#define SITOHREG(si, x)		(ctx->fpr[x] = \
-				ctx->fpr[x] << 32 >> 32 | (u64)(si) << 32)
 
 /*
  * Emulate the single floating point instruction pointed at by EPC.
@@ -1325,11 +1375,11 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			cond = 0;
 			switch (MIPSInst_RS(ir)) {
 			case bc1eqz_op:
-				if (current->thread.fpu.fpr[reg] == (__u64)0)
+				if (!(get_fpr64(&current->thread.fpu.fpr[reg], 0) & (__u64)0x1))
 					cond = 1;
 				break;
 			case bc1nez_op:
-				if (current->thread.fpu.fpr[reg] != (__u64)0)
+				if (get_fpr64(&current->thread.fpu.fpr[reg], 0) & (__u64)0x1)
 					cond = 1;
 				break;
 			}
@@ -1496,6 +1546,7 @@ default_op:
 #endif
 
 	default:
+		xcp->regs[31] = r31;
 		return SIGILL;
 	}
 
@@ -1519,6 +1570,12 @@ static const unsigned char cmptab[8] = {
 	IEEE754_CLT | IEEE754_CUN,	/* cmp_ult (sig) cmp_nge */
 	IEEE754_CLT | IEEE754_CEQ,	/* cmp_ole (sig) cmp_le */
 	IEEE754_CLT | IEEE754_CEQ | IEEE754_CUN,	/* cmp_ule (sig) cmp_ngt */
+};
+static const unsigned char ncmptab[8] = {
+	0,
+	IEEE754_CLT | IEEE754_CGT | IEEE754_CEQ,
+	IEEE754_CLT | IEEE754_CGT | IEEE754_CUN,
+	IEEE754_CLT | IEEE754_CGT,
 };
 
 
@@ -1774,6 +1831,9 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 #ifdef __mips64
 		s64 l;
 #endif
+#ifdef CONFIG_CPU_MIPSR6
+		s64 ll;
+#endif
 	} rv;			/* resulting value */
 
 	MIPS_FPU_EMU_INC_STATS(cp1ops);
@@ -1912,6 +1972,90 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		}
 #endif /* __mips >= 2 */
 
+#ifdef CONFIG_CPU_MIPSR6
+		case frint_op:{
+			ieee754sp fs;
+
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			rv.ll = ieee754sp_tlong(fs);
+			rv.s = ieee754sp_flong(rv.ll);
+			goto copcsr;
+		}
+
+		case fclass_op:{
+			ieee754sp fs;
+
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			rv.w = ieee754_2008sp_class(fs);
+			rfmt = w_fmt;
+			break;
+		}
+
+		case fmaddf_op:{
+			ieee754sp fs;
+			ieee754sp ft;
+			ieee754sp fd;
+
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			SPFROMREG(ft, MIPSInst_FT(ir));
+			SPFROMREG(fd, MIPSInst_FD(ir));
+			rv.s = ieee754sp_maddf(fd, fs, ft);
+			break;
+		}
+
+		case fmsubf_op:{
+			ieee754sp fs;
+			ieee754sp ft;
+			ieee754sp fd;
+
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			SPFROMREG(ft, MIPSInst_FT(ir));
+			SPFROMREG(fd, MIPSInst_FD(ir));
+			rv.s = ieee754sp_msubf(fd, fs, ft);
+			break;
+		}
+
+		case fmin_op:{
+			ieee754sp fs;
+			ieee754sp ft;
+
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			SPFROMREG(ft, MIPSInst_FT(ir));
+			rv.s = ieee754sp_fmin(fs, ft);
+			break;
+		}
+
+		case fmax_op:{
+			ieee754sp fs;
+			ieee754sp ft;
+
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			SPFROMREG(ft, MIPSInst_FT(ir));
+			rv.s = ieee754sp_fmax(fs, ft);
+			break;
+		}
+
+		case fmina_op:{
+			ieee754sp fs;
+			ieee754sp ft;
+
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			SPFROMREG(ft, MIPSInst_FT(ir));
+			rv.s = ieee754sp_fmina(fs, ft);
+			break;
+		}
+
+		case fmaxa_op:{
+			ieee754sp fs;
+			ieee754sp ft;
+
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			SPFROMREG(ft, MIPSInst_FT(ir));
+			rv.s = ieee754sp_fmaxa(fs, ft);
+			break;
+		}
+#endif
+
 #if defined(__mips64)
 		case fcvtl_op:{
 			ieee754sp fs;
@@ -1937,6 +2081,20 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			goto copcsr;
 		}
 #endif /* defined(__mips64) */
+
+#ifdef CONFIG_CPU_MIPSR6
+		case fsel_op:{
+			ieee754sp ftmp;
+
+			SPFROMREG(ftmp, MIPSInst_FD(ir));
+			if (ftmp.bits & 0x1)
+				SPFROMREG(ftmp, MIPSInst_FT(ir));
+			else
+				SPFROMREG(ftmp, MIPSInst_FS(ir));
+			rv.s = ftmp;
+			break;
+		}
+#endif
 
 		default:
 			if (MIPSInst_FUNC(ir) >= fcmp_op) {
@@ -2086,6 +2244,90 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		}
 #endif
 
+#ifdef CONFIG_CPU_MIPSR6
+		case frint_op:{
+			ieee754dp fs;
+
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			rv.ll = ieee754dp_tlong(fs);
+			rv.d = ieee754dp_flong(rv.ll);
+			goto copcsr;
+		}
+
+		case fclass_op:{
+			ieee754dp fs;
+
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			rv.w = ieee754_2008dp_class(fs);
+			rfmt = w_fmt;
+			break;
+		}
+
+		case fmaddf_op:{
+			ieee754dp fs;
+			ieee754dp ft;
+			ieee754dp fd;
+
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			DPFROMREG(ft, MIPSInst_FT(ir));
+			DPFROMREG(fd, MIPSInst_FD(ir));
+			rv.d = ieee754dp_maddf(fd, fs, ft);
+			break;
+		}
+
+		case fmsubf_op:{
+			ieee754dp fs;
+			ieee754dp ft;
+			ieee754dp fd;
+
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			DPFROMREG(ft, MIPSInst_FT(ir));
+			DPFROMREG(fd, MIPSInst_FD(ir));
+			rv.d = ieee754dp_msubf(fd, fs, ft);
+			break;
+		}
+
+		case fmin_op:{
+			ieee754dp fs;
+			ieee754dp ft;
+
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			DPFROMREG(ft, MIPSInst_FT(ir));
+			rv.d = ieee754dp_fmin(fs, ft);
+			break;
+		}
+
+		case fmax_op:{
+			ieee754dp fs;
+			ieee754dp ft;
+
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			DPFROMREG(ft, MIPSInst_FT(ir));
+			rv.d = ieee754dp_fmax(fs, ft);
+			break;
+		}
+
+		case fmina_op:{
+			ieee754dp fs;
+			ieee754dp ft;
+
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			DPFROMREG(ft, MIPSInst_FT(ir));
+			rv.d = ieee754dp_fmina(fs, ft);
+			break;
+		}
+
+		case fmaxa_op:{
+			ieee754dp fs;
+			ieee754dp ft;
+
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			DPFROMREG(ft, MIPSInst_FT(ir));
+			rv.d = ieee754dp_fmaxa(fs, ft);
+			break;
+		}
+#endif
+
 #if defined(__mips64)
 		case fcvtl_op:{
 			ieee754dp fs;
@@ -2111,6 +2353,20 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			goto copcsr;
 		}
 #endif /* __mips >= 3 */
+
+#ifdef CONFIG_CPU_MIPSR6
+		case fsel_op:{
+			ieee754dp ftmp;
+
+			DPFROMREG(ftmp, MIPSInst_FD(ir));
+			if (ftmp.bits & 0x1)
+				DPFROMREG(ftmp, MIPSInst_FT(ir));
+			else
+				DPFROMREG(ftmp, MIPSInst_FS(ir));
+			rv.d = ftmp;
+			break;
+		}
+#endif
 
 		default:
 			if (MIPSInst_FUNC(ir) >= fcmp_op) {
@@ -2155,27 +2411,118 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			rv.d = ieee754dp_fint(fs.bits);
 			rfmt = d_fmt;
 			goto copcsr;
-		default:
+		default: {
+#ifdef CONFIG_CPU_MIPSR6
+			unsigned cmpop = MIPSInst_FUNC(ir) & 0xf;
+			ieee754sp fs, ft;
+
+			if (!(MIPSInst_RS(ir) & 0x10))
+				return SIGILL;
+
+			rv.w = 0;
+			rfmt = s_fmt;
+			SPFROMREG(fs, MIPSInst_FS(ir));
+			SPFROMREG(ft, MIPSInst_FT(ir));
+			if ((MIPSInst_FUNC(ir) & 0x10) == 0) {
+				if (ieee754sp_cmp(fs, ft,
+				    cmptab[cmpop & 0x7], cmpop & 0x8))
+					rv.w = -1;
+				if ((cmpop & 0x8) && ieee754_cxtest
+					(IEEE754_INVALID_OPERATION))
+					rcsr = FPU_CSR_INV_X | FPU_CSR_INV_S;
+				else
+					goto copcsr;
+			} else {
+				/* negative predicates */
+				switch (cmpop & 0x7) {
+				case 1:
+				case 2:
+				case 3:
+					if (ieee754sp_cmp(fs, ft,
+					    ncmptab[cmpop & 0x7], cmpop & 0x8))
+						rv.w = -1;
+					if ((cmpop & 0x8) && ieee754_cxtest
+						(IEEE754_INVALID_OPERATION))
+						rcsr = FPU_CSR_INV_X | FPU_CSR_INV_S;
+					else
+						goto copcsr;
+					break;
+				default:
+					return SIGILL;
+				}
+			}
+			break;
+#else
 			return SIGILL;
+#endif
+			}
 		}
 		break;
 	}
 
 #if defined(__mips64)
 	case l_fmt:{
+		u64 bits;
+		DIFROMREG(bits, MIPSInst_FS(ir));
+
 		switch (MIPSInst_FUNC(ir)) {
 		case fcvts_op:
 			/* convert long to single precision real */
-			rv.s = ieee754sp_flong(ctx->fpr[MIPSInst_FS(ir)]);
+			rv.s = ieee754sp_flong(bits);
 			rfmt = s_fmt;
 			goto copcsr;
 		case fcvtd_op:
 			/* convert long to double precision real */
-			rv.d = ieee754dp_flong(ctx->fpr[MIPSInst_FS(ir)]);
+			rv.d = ieee754dp_flong(bits);
 			rfmt = d_fmt;
 			goto copcsr;
-		default:
+		default: {
+#ifdef CONFIG_CPU_MIPSR6
+			unsigned cmpop = MIPSInst_FUNC(ir) & 0xf;
+			ieee754dp fs, ft;
+
+			if (!(MIPSInst_RS(ir) & 0x10))
+				return SIGILL;
+
+			rv.ll = 0;
+			rfmt = d_fmt;
+			DPFROMREG(fs, MIPSInst_FS(ir));
+			DPFROMREG(ft, MIPSInst_FT(ir));
+			if ((MIPSInst_FUNC(ir) & 0x10) == 0) {
+				if (ieee754dp_cmp(fs, ft,
+				    cmptab[cmpop & 0x7], cmpop & 0x8))
+					rv.ll = -1LL;
+				if ((cmpop & 0x8)
+					&&
+					ieee754_cxtest
+					(IEEE754_INVALID_OPERATION))
+					rcsr = FPU_CSR_INV_X | FPU_CSR_INV_S;
+				else
+					goto copcsr;
+			} else {
+				/* negative predicates */
+				switch (cmpop & 0x7) {
+				case 1:
+				case 2:
+				case 3:
+					if (ieee754dp_cmp(fs, ft,
+					    ncmptab[cmpop & 0x7], cmpop & 0x8))
+						rv.ll = -1LL;
+					if ((cmpop & 0x8) && ieee754_cxtest
+						(IEEE754_INVALID_OPERATION))
+						rcsr = FPU_CSR_INV_X | FPU_CSR_INV_S;
+					else
+						goto copcsr;
+					break;
+				default:
+					return SIGILL;
+				}
+			}
+			break;
+#else
 			return SIGILL;
+#endif
+			}
 		}
 		break;
 	}
@@ -2328,6 +2675,7 @@ int fpu_emulator_cop1Handler(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			break;
 
 		cond_resched();
+		thread_fpu_flags_update();
 	} while (xcp->cp0_epc > prevepc);
 
 	/* SIGILL indicates a non-fpu instruction */

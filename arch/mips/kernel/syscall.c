@@ -38,7 +38,10 @@
 #include <asm/sysmips.h>
 #include <asm/uaccess.h>
 #include <asm/switch_to.h>
+#include <asm/fpu.h>
 
+extern unsigned int system_has_fpu;
+extern unsigned int global_fpu_id;
 /*
  * For historic reasons the pipe(2) syscall on MIPS has an unusual calling
  * convention.	It returns results in registers $v0 / $v1 which means there
@@ -201,6 +204,110 @@ static inline int mips_atomic_set(unsigned long addr, unsigned long new)
 	unreachable();
 }
 
+asmlinkage void mips_lose_fpu(void)
+{
+	preempt_disable();
+	clear_thread_flag(TIF_FPU_LOSE_REQUEST);
+	lose_fpu_inatomic(1);
+	preempt_enable_no_resched();
+}
+
+void mips_switch_fpu_mode(void *info)
+{
+	struct mm_struct *mm = info;
+
+	if ((current->mm == mm) && is_fpu_owner())
+		set_thread_flag(TIF_FPU_LOSE_REQUEST);
+}
+
+unsigned int mips_fpu_prctl(unsigned long type, unsigned long param)
+{
+	register unsigned long val;
+	register unsigned long mask;
+	register unsigned long *addr;
+
+	switch (type) {
+	case PR_SET_FP_MODE:
+		if (param & ~(PR_FP_MODE_FR|PR_FP_MODE_FRE))
+			return -EINVAL;
+
+#ifndef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+		if (system_has_fpu) {
+			if ((param & PR_FP_MODE_FRE) && !cpu_has_fre)
+				return -EOPNOTSUPP;
+			if ((param & PR_FP_MODE_FR) && !(global_fpu_id & MIPS_FPIR_F64))
+				return -EOPNOTSUPP;
+			if (!(param & PR_FP_MODE_FR)) {
+				unsigned int res;
+				unsigned int status;
+
+				/* test FPU with FR0 capability */
+				local_irq_disable();
+				status = change_c0_status(ST0_FR|ST0_CU1, ST0_CU1);
+				enable_fpu_hazard();
+				res = read_c0_status();
+				write_c0_status(status);
+				disable_fpu_hazard();
+				local_irq_enable();
+				if (res & ST0_FR)
+					return -EOPNOTSUPP;
+			}
+		}
+#endif
+		val = (param & PR_FP_MODE_FR)? LTIF_FPU_FR : 0;
+		val |= (param & PR_FP_MODE_FRE)? LTIF_FPU_FRE : 0;
+		mask = ~(LTIF_FPU_FR|LTIF_FPU_FRE);
+		preempt_disable();
+		addr = &(current->mm->context.thread_flags);
+		__asm__ __volatile__(
+			".set push                      \n"
+			".set noreorder                 \n"
+			".set noat                      \n"
+#ifdef CONFIG_64BIT
+			"1: lld     $1, 0(%0)           \n"
+			"   and     $1, $1, %1          \n"
+			"   or      $1, $1, %2          \n"
+			"   scd     $1, 0(%0)           \n"
+#else
+			"1: ll      $1, 0(%0)           \n"
+			"   and     $1, $1, %1          \n"
+			"   or      $1, $1, %2          \n"
+			"   sc      $1, 0(%0)           \n"
+#endif
+			"   beqz    $1, 1b              \n"
+			"     nop                       \n"
+			".set pop                       \n"
+			:
+			: "r"(addr), "r"(mask), "r"(val)
+			: "memory");
+		smp_llsc_mb();
+		/* send a "barrier" for FPU mode - force other CPUs to lose FPU */
+		if (atomic_read(&current->mm->mm_users) != 1)
+			smp_call_function(mips_switch_fpu_mode, (void *)(current->mm), 1);
+		lose_fpu(1);
+		preempt_enable();
+		break;
+
+	case PR_GET_FP_MODE:
+		if (unlikely(param & 3))
+			return -EINVAL;
+
+		if (unlikely(!access_ok(VERIFY_WRITE, param, 4)))
+			return -EINVAL;
+
+		val = (current_thread_info()->local_flags & LTIF_FPU_FR)? PR_FP_MODE_FR : 0;
+		val |= (current_thread_info()->local_flags & LTIF_FPU_FRE)? PR_FP_MODE_FRE : 0;
+		if (put_user(val, (unsigned long *)param))
+			return -EINVAL;
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 SYSCALL_DEFINE3(sysmips, long, cmd, long, arg1, long, arg2)
 {
 	switch (cmd) {
@@ -225,6 +332,9 @@ SYSCALL_DEFINE3(sysmips, long, cmd, long, arg1, long, arg2)
 	case FLUSH_CACHE:
 		__flush_cache_all();
 		return 0;
+
+	case MIPS_FPU_PRCTL:
+		return mips_fpu_prctl(arg1, arg2);
 	}
 
 	return -EINVAL;

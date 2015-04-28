@@ -139,7 +139,11 @@ LEAF(__r4k_wait)
 	nop
 	nop
 #endif
+#ifdef CONFIG_CPU_MIPSR6
+	.set    mips64r6
+#else
 	.set	mips3
+#endif
 	wait
 	/* end of rollback region (the region size must be power of two) */
 1:
@@ -424,12 +428,21 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	.set	push
 	/* gas fails to assemble cfc1 for some archs (octeon).*/ \
 	.set	mips1
-	.set    hardfloat
+	SET_HARDFLOAT
 	cfc1	a1, fcr31
 	li	a2, ~(0x3f << 12)
 	and	a2, a1
 	ctc1	a2, fcr31
 	.set	pop
+	TRACE_IRQS_ON
+	STI
+	.endm
+
+	.macro	__build_clear_msa_fpe
+	_cfcmsa	a1, MSA_CSR
+	li	a2, ~(0x3f << 12)
+	and	a1, a1, a2
+	_ctcmsa	MSA_CSR, a1
 	TRACE_IRQS_ON
 	STI
 	.endm
@@ -492,8 +505,10 @@ NESTED(nmi_handler, PT_SIZE, sp)
 	BUILD_HANDLER cpu cpu sti silent		/* #11 */
 	BUILD_HANDLER ov ov sti silent			/* #12 */
 	BUILD_HANDLER tr tr sti silent			/* #13 */
+	BUILD_HANDLER msa_fpe msa_fpe msa_fpe silent	/* #14 */
 	BUILD_HANDLER fpe fpe fpe silent		/* #15 */
-	BUILD_HANDLER ftlb ftlb none silent             /* #16 */
+	BUILD_HANDLER ftlb ftlb none silent		/* #16 */
+	BUILD_HANDLER msa msa sti silent		/* #21 */
 	BUILD_HANDLER mdmx mdmx sti silent		/* #22 */
 #ifdef	CONFIG_HARDWARE_WATCHPOINTS
 	/*

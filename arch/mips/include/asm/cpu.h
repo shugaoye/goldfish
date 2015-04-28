@@ -104,6 +104,7 @@
 #define PRID_IMP_PROAPTIV_MP	0xa300
 #define PRID_IMP_VIRTUOSO       0xa700
 #define PRID_IMP_P5600          0xa800
+#define PRID_IMP_SAMURAI_UP     0xa900
 
 /*
  * These are the PRID's for when 23:16 == PRID_COMP_SIBYTE
@@ -280,7 +281,7 @@ enum cpu_type_enum {
 	 */
 	CPU_5KC, CPU_5KE, CPU_20KC, CPU_25KF, CPU_SB1, CPU_SB1A, CPU_LOONGSON2,
 	CPU_CAVIUM_OCTEON, CPU_CAVIUM_OCTEON_PLUS, CPU_CAVIUM_OCTEON2,
-	CPU_XLR, CPU_XLP,
+	CPU_XLR, CPU_XLP, CPU_SAMURAI,
 
 	CPU_QEMU,
 	CPU_LAST
@@ -352,6 +353,10 @@ enum cpu_type_enum {
 #define MIPS_CPU_MAAR           0x00000001      /* MAAR exists */
 #define MIPS_CPU_HIMEM          0x00000002 /* MIPS32: PA bits exceed PTE space */
 #define MIPS_CPU_FRE            0x00000004 /* CPU has FRE support */
+#define MIPS_CPU_HTW            0x00000008 /* CPU support Hardware Page Table Walker */
+#define MIPS_CPU_L2C            0x00000010 /* CPU has _NO_ L2 description in Config2 */
+#define MIPS_CPU_VC             0x00000020 /* CPU has VC-MT support: GNR, CM3 virtual GIC etc */
+#define MIPS_CPU_CM3_INCLUSIVE_CACHES       0x00000040 /* L1D is included in L2 */
 
 /*
  * CPU ASE encodings
@@ -364,5 +369,6 @@ enum cpu_type_enum {
 #define MIPS_ASE_MIPSMT		0x00000020 /* CPU supports MIPS MT */
 #define MIPS_ASE_DSP2P		0x00000040 /* Signal Processing ASE Rev 2 */
 #define MIPS_ASE_VZ		0x00000080 /* Virtualization ASE */
+#define MIPS_ASE_MSA		0x00000100 /* MIPS SIMD Architecture */
 
 #endif /* _ASM_CPU_H */

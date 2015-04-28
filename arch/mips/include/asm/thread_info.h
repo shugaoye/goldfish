@@ -25,6 +25,7 @@ struct thread_info {
 	struct task_struct	*task;		/* main task structure */
 	struct exec_domain	*exec_domain;	/* execution domain */
 	unsigned long		flags;		/* low level flags */
+	unsigned long           local_flags;    /* low level flags, no locking access */
 	unsigned long		tp_value;	/* thread pointer */
 	__u32			cpu;		/* current CPU */
 	int			preempt_count;	/* 0 => preemptable, <0 => BUG */
@@ -48,6 +49,7 @@ struct thread_info {
 	.task		= &tsk,			\
 	.exec_domain	= &default_exec_domain, \
 	.flags		= _TIF_FIXADE,		\
+	.local_flags    = 0,                    \
 	.cpu		= 0,			\
 	.preempt_count	= INIT_PREEMPT_COUNT,	\
 	.addr_limit	= KERNEL_DS,		\
@@ -104,6 +106,7 @@ static inline struct thread_info *current_thread_info(void)
  * - pending work-to-be-done flags are in LSW
  * - other flags in MSW
  */
+#define TIF_FPU_LOSE_REQUEST    0       /* request to lose FPU from IPI call */
 #define TIF_SIGPENDING		1	/* signal pending */
 #define TIF_NEED_RESCHED	2	/* rescheduling necessary */
 #define TIF_SYSCALL_AUDIT	3	/* syscall auditing active */
@@ -118,8 +121,12 @@ static inline struct thread_info *current_thread_info(void)
 #define TIF_32BIT_ADDR		23	/* 32-bit address space (o32/n32) */
 #define TIF_FPUBOUND		24	/* thread bound to FPU-full CPU set */
 #define TIF_LOAD_WATCH		25	/* If set, load watch registers */
+
+#define TIF_USEDMSA		29	/* MSA has been used this quantum */
+#define TIF_MSA_CTX_LIVE	30	/* MSA context must be preserved */
 #define TIF_SYSCALL_TRACE	31	/* syscall trace active */
 
+#define _TIF_FPU_LOSE_REQUEST   (1<<TIF_FPU_LOSE_REQUEST)
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)
 #define _TIF_SIGPENDING		(1<<TIF_SIGPENDING)
 #define _TIF_NEED_RESCHED	(1<<TIF_NEED_RESCHED)
@@ -133,6 +140,13 @@ static inline struct thread_info *current_thread_info(void)
 #define _TIF_32BIT_ADDR		(1<<TIF_32BIT_ADDR)
 #define _TIF_FPUBOUND		(1<<TIF_FPUBOUND)
 #define _TIF_LOAD_WATCH		(1<<TIF_LOAD_WATCH)
+#define _TIF_USEDMSA		(1<<TIF_USEDMSA)
+#define _TIF_MSA_CTX_LIVE	(1<<TIF_MSA_CTX_LIVE)
+#define _TIF_SYSCALL_TRACEPOINT	(1<<TIF_SYSCALL_TRACEPOINT)
+
+#define _TIF_WORK_SYSCALL_ENTRY	(_TIF_NOHZ | _TIF_SYSCALL_TRACE |	\
+				 _TIF_SYSCALL_AUDIT | \
+				 _TIF_SYSCALL_TRACEPOINT | _TIF_SECCOMP)
 
 /* work to do in syscall_trace_leave() */
 #define _TIF_WORK_SYSCALL_EXIT	(_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT)
@@ -142,6 +156,33 @@ static inline struct thread_info *current_thread_info(void)
 	(_TIF_SIGPENDING | _TIF_NEED_RESCHED | _TIF_NOTIFY_RESUME)
 /* work to do on any return to u-space */
 #define _TIF_ALLWORK_MASK	(_TIF_WORK_MASK | _TIF_WORK_SYSCALL_EXIT)
+
+/* local thread information flags, update only from thread itself = no locking */
+#define LTIF_FPU_FR             0x00000001   /* Status.FR bit state for this thread */
+#define LTIF_FPU_FRE            0x00000002   /* Mixed FPU mode emulation */
+
+#ifndef __ASSEMBLY__
+static inline void set_thread_local_flags(unsigned long x)
+{
+	current_thread_info()->local_flags |= x;
+}
+
+static inline void clear_thread_local_flags(unsigned long x)
+{
+	current_thread_info()->local_flags &= ~x;
+}
+
+static inline void change_thread_local_flags(unsigned long x, unsigned long f)
+{
+	current_thread_info()->local_flags =
+		 (current_thread_info()->local_flags & ~x) | f;
+}
+
+static inline int test_thread_local_flags(unsigned long x)
+{
+	return ((current_thread_info()->local_flags & x)? 1 : 0);
+}
+#endif
 
 #endif /* __KERNEL__ */
 

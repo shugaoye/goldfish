@@ -22,6 +22,7 @@
 #include <asm/cpu.h>
 #include <asm/fpu.h>
 #include <asm/mipsregs.h>
+#include <asm/msa.h>
 #include <asm/watch.h>
 #include <asm/elf.h>
 #include <asm/spram.h>
@@ -50,6 +51,20 @@ static int __init dsp_disable(char *s)
 }
 
 __setup("nodsp", dsp_disable);
+
+static int mips_htw_disabled;
+
+static int __init htw_disable(char *s)
+{
+	mips_htw_disabled = 1;
+	if (cpu_has_htw) {
+		write_c0_pwctl(HTW_PWCTL_BASE);
+		cpu_data[0].options2 &= ~MIPS_CPU_HTW;
+	}
+	return 1;
+}
+
+__setup("nohtw", htw_disable);
 
 static inline void check_errata(void)
 {
@@ -141,6 +156,21 @@ static inline unsigned long cpu_test_fpu_csr31(unsigned long fcr31)
 static inline int __cpu_has_fpu(void)
 {
 	return ((cpu_get_fpu_id() & 0xff00) != FPIR_IMP_NONE);
+}
+
+static inline unsigned long cpu_get_msa_id(void)
+{
+	unsigned long status, msa_id;
+
+	status = read_c0_status();
+	set_c0_status(ST0_CU1|ST0_FR);
+	enable_fpu_hazard();
+	clear_c0_config5(MIPS_CONF5_FRE);
+	enable_msa();
+	msa_id = read_msa_ir();
+	disable_msa();
+	write_c0_status(status);
+	return msa_id;
 }
 
 static inline void cpu_probe_vmbits(struct cpuinfo_mips *c)
@@ -321,6 +351,11 @@ static inline unsigned int decode_config3(struct cpuinfo_mips *c)
 		c->ases |= MIPS_ASE_VZ;
 	if (config3 & MIPS_CONF3_SC)
 		c->options |= MIPS_CPU_SEGMENTS;
+	/* Only tested on 32-bit cores */
+	if ((config3 & MIPS_CONF3_PW) && config_enabled(CONFIG_32BIT))
+		c->options2 |= MIPS_CPU_HTW;
+	if (config3 & MIPS_CONF3_MSA)
+		c->ases |= MIPS_ASE_MSA;
 
 	return config3 & MIPS_CONF_M;
 }
@@ -438,11 +473,17 @@ static inline unsigned int decode_config5(struct cpuinfo_mips *c)
 	unsigned int config5;
 
 	config5 = read_c0_config5();
+	config5 &= ~(MIPS_CONF5_UFR | MIPS_CONF5_UFE);
+	write_c0_config5(config5);
 
 	if (config5 & MIPS_CONF5_EVA)
 		c->options |= MIPS_CPU_EVA;
 	if (config5 & MIPS_CONF5_MRP)
 		c->options2 |= MIPS_CPU_MAAR;
+	if (config5 & MIPS_CONF5_L2C)
+		c->options2 |= MIPS_CPU_L2C;
+	if (config5 & MIPS_CONF5_VC)
+		c->options2 |= MIPS_CPU_VC;
 
 	return config5 & MIPS_CONF_M;
 }
@@ -934,6 +975,10 @@ static inline void cpu_probe_mips(struct cpuinfo_mips *c, unsigned int cpu)
 		__cpu_name[cpu] = "MIPS P5600";
 		cpu_capability = MIPS_FTLB_CAPABLE;
 		break;
+	case PRID_IMP_SAMURAI_UP:
+		c->cputype = CPU_SAMURAI;
+		__cpu_name[cpu] = "MIPS Samurai UP";
+		break;
 	}
 	decode_configs(c);
 
@@ -1194,6 +1239,7 @@ const char *__cpu_name[NR_CPUS];
 const char *__elf_platform;
 unsigned int fpu_fcr31 __read_mostly = 0;
 unsigned int system_has_fpu __read_mostly = 0;
+unsigned int global_fpu_id  __read_mostly = 0;
 
 __cpuinit void cpu_probe(void)
 {
@@ -1254,11 +1300,18 @@ __cpuinit void cpu_probe(void)
 	if (mips_dsp_disabled)
 		c->ases &= ~(MIPS_ASE_DSP | MIPS_ASE_DSP2P);
 
+	c->htw_level = 0;
+	if (c->options2 & MIPS_CPU_HTW)
+		write_c0_pwctl(HTW_PWCTL_BASE);
+	if (mips_htw_disabled)
+		c->options2 &= ~MIPS_CPU_HTW;
+
 	if (c->options & MIPS_CPU_FPU) {
 		system_has_fpu = 1;
 		fpu_fcr31 = cpu_test_fpu_csr31(FPU_CSR_DEFAULT);
 
-		c->fpu_id = cpu_get_fpu_id();
+		global_fpu_id = cpu_get_fpu_id();
+		c->fpu_id = global_fpu_id;
 
 		if (c->isa_level & (MIPS_CPU_ISA_M32R1 | MIPS_CPU_ISA_M32R2 |
 				    MIPS_CPU_ISA_M64R1 | MIPS_CPU_ISA_M64R2)) {
@@ -1266,8 +1319,10 @@ __cpuinit void cpu_probe(void)
 				c->ases |= MIPS_ASE_MIPS3D;
 			if (c->fpu_id & MIPS_FPIR_HAS2008)
 				fpu_fcr31 = cpu_test_fpu_csr31(FPU_CSR_DEFAULT|FPU_CSR_MAC2008|FPU_CSR_ABS2008|FPU_CSR_NAN2008);
-			if (c->fpu_id & MIPS_FPIR_FREP)
+			if (c->fpu_id & MIPS_FPIR_FREP) {
 				c->options2 |= MIPS_CPU_FRE;
+				pr_info("FPU has FRE support\n");
+			}
 		}
 	}
 
@@ -1278,6 +1333,12 @@ __cpuinit void cpu_probe(void)
 	}
 	else
 		c->srsets = 1;
+
+	if (cpu_has_msa) {
+		c->msa_id = cpu_get_msa_id();
+		WARN(c->msa_id & MSA_IR_WRPF,
+		     "Vector register partitioning unimplemented!");
+	}
 
 	cpu_probe_vmbits(c);
 	cpu_probe_pabits(c);
@@ -1296,4 +1357,6 @@ __cpuinit void cpu_report(void)
 	       smp_processor_id(), c->processor_id, cpu_name_string());
 	if (c->options & MIPS_CPU_FPU)
 		printk(KERN_INFO "FPU revision is: %08x\n", c->fpu_id);
+	if (cpu_has_msa)
+		pr_info("MSA revision is: %08x\n", c->msa_id);
 }

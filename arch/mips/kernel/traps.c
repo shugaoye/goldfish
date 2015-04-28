@@ -45,6 +45,7 @@
 #include <asm/mipsregs.h>
 #include <asm/mipsmtregs.h>
 #include <asm/module.h>
+#include <asm/msa.h>
 #include <asm/pgtable.h>
 #include <asm/ptrace.h>
 #include <asm/sections.h>
@@ -75,8 +76,10 @@ extern asmlinkage void handle_ri_rdhwr(void);
 extern asmlinkage void handle_cpu(void);
 extern asmlinkage void handle_ov(void);
 extern asmlinkage void handle_tr(void);
+extern asmlinkage void handle_msa_fpe(void);
 extern asmlinkage void handle_fpe(void);
 extern asmlinkage void handle_ftlb(void);
+extern asmlinkage void handle_msa(void);
 extern asmlinkage void handle_mdmx(void);
 extern asmlinkage void handle_watch(void);
 extern asmlinkage void handle_mt(void);
@@ -691,6 +694,13 @@ asmlinkage void do_ov(struct pt_regs *regs)
 
 int process_fpemu_return(int sig, void __user *fault_addr)
 {
+	/*
+	 * We can't allow the emulated instruction to leave any of the cause
+	 * bits set in FCSR. If they were then the kernel would take an FP
+	 * exception when restoring FP context.
+	 */
+	current->thread.fpu.fcr31 &= ~FPU_CSR_ALL_X;
+
 	if (sig == SIGSEGV || sig == SIGBUS) {
 		struct siginfo si = {0};
 		si.si_addr = fault_addr;
@@ -729,6 +739,8 @@ asmlinkage void do_fpe(struct pt_regs *regs, unsigned long fcr31)
 		int sig;
 		void __user *fault_addr = NULL;
 
+		if (!used_math())
+			init_fpu();
 		/*
 		 * Unimplemented operation exception.  If we've got the full
 		 * software emulator on-board, let's use it...
@@ -746,17 +758,11 @@ asmlinkage void do_fpe(struct pt_regs *regs, unsigned long fcr31)
 		sig = fpu_emulator_cop1Handler(regs, &current->thread.fpu, 1,
 					       &fault_addr);
 
-		/*
-		 * We can't allow the emulated instruction to leave any of
-		 * the cause bit set in $fcr31.
-		 */
-		current->thread.fpu.fcr31 &= ~FPU_CSR_ALL_X;
+		/* If something went wrong, signal */
+		process_fpemu_return(sig, fault_addr);
 
 		/* Restore the hardware register state */
 		own_fpu(1);	/* Using the FPU again.	 */
-
-		/* If something went wrong, signal */
-		process_fpemu_return(sig, fault_addr);
 
 		return;
 	} else if (fcr31 & FPU_CSR_INV_X)
@@ -952,9 +958,15 @@ asmlinkage void do_tr(struct pt_regs *regs)
 	}
 
 	do_trap_or_bp(regs, tcode, "Trap");
+#ifdef CONFIG_EVA
+	set_fs(seg);
+#endif
 	return;
 
 out_sigsegv:
+#ifdef CONFIG_EVA
+	set_fs(seg);
+#endif
 	force_sig(SIGSEGV, current);
 }
 
@@ -973,16 +985,10 @@ asmlinkage void do_ri(struct pt_regs *regs)
 			switch (status) {
 			case SIGEMT:
 			case 0:
-				if (test_thread_flag(TIF_32BIT_ADDR) &&
-				    !test_thread_flag(TIF_32BIT_REGS))
-					set_thread_flag(TIF_32BIT_REGS);
 				return;
 			case SIGILL:
 				break;
 			default:
-				if (test_thread_flag(TIF_32BIT_ADDR) &&
-				    !test_thread_flag(TIF_32BIT_REGS))
-					set_thread_flag(TIF_32BIT_REGS);
 				process_fpemu_return(status, (void __user *)current->thread.cp0_baduaddr);
 				return;
 			}
@@ -1096,6 +1102,133 @@ static int default_cu2_call(struct notifier_block *nfb, unsigned long action,
 	return NOTIFY_OK;
 }
 
+static int enable_restore_fp_context(int msa)
+{
+	int err, was_fpu_owner, prior_msa;
+
+	if (!used_math()) {
+		/* First time FP context user. */
+		if (msa && !raw_cpu_has_fpu) {
+			force_sig(SIGFPE, current);
+			return(-1);
+		}
+		preempt_disable();
+		err = init_fpu();
+		if (msa && !err) {
+			enable_msa();
+			_init_msa_upper();
+			set_thread_flag(TIF_USEDMSA);
+			set_thread_flag(TIF_MSA_CTX_LIVE);
+		}
+		preempt_enable();
+		if (!err)
+			set_used_math();
+		else
+#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
+			if (!mipsr2_emulation)
+#endif
+			{
+				force_sig(SIGFPE, current);
+				return(-1);
+			}
+		return err;
+	}
+
+	/*
+	 * This task has formerly used the FP context.
+	 *
+	 * If this thread has no live MSA vector context then we can simply
+	 * restore the scalar FP context. If it has live MSA vector context
+	 * (that is, it has or may have used MSA since last performing a
+	 * function call) then we'll need to restore the vector context. This
+	 * applies even if we're currently only executing a scalar FP
+	 * instruction. This is because if we were to later execute an MSA
+	 * instruction then we'd either have to:
+	 *
+	 *  - Restore the vector context & clobber any registers modified by
+	 *    scalar FP instructions between now & then.
+	 *
+	 * or
+	 *
+	 *  - Not restore the vector context & lose the most significant bits
+	 *    of all vector registers.
+	 *
+	 * Neither of those options is acceptable. We cannot restore the least
+	 * significant bits of the registers now & only restore the most
+	 * significant bits later because the most significant bits of any
+	 * vector registers whose aliased FP register is modified now will have
+	 * been zeroed. We'd have no way to know that when restoring the vector
+	 * context & thus may load an outdated value for the most significant
+	 * bits of a vector register.
+	 *
+	 * Note LY22: It is possible to restore a partial MSA context via "insert"
+	 *      This can be used to restore an upper parts of MSA.
+	 *      But that upper parts should exists and be saved.
+	 */
+	if (!msa && !thread_msa_context_live())
+		return own_fpu(1);
+
+	if (!raw_cpu_has_fpu) {
+		force_sig(SIGFPE, current);
+		return(-1);
+	}
+	/*
+	 * This task is using or has previously used MSA. Thus we require
+	 * that Status.FR == 1.
+	 */
+	preempt_disable();
+	was_fpu_owner = is_fpu_owner();
+	err = own_fpu_inatomic(0);
+	if (err)
+		goto out;
+
+	enable_msa();
+	write_msa_csr(current->thread.fpu.msacsr);
+	set_thread_flag(TIF_USEDMSA);
+
+	/*
+	 * If this is the first time that the task is using MSA and it has
+	 * previously used scalar FP in this time slice then we already nave
+	 * FP context which we shouldn't clobber. We do however need to clear
+	 * the upper 64b of each vector register so that this task has no
+	 * opportunity to see data left behind by another.
+	 */
+	prior_msa = test_and_set_thread_flag(TIF_MSA_CTX_LIVE);
+	if (!prior_msa && was_fpu_owner) {
+		_init_msa_upper();
+
+		goto out;
+	}
+
+	if (!prior_msa) {
+		/*
+		 * Restore the least significant 64b of each vector register
+		 * from the existing scalar FP context.
+		 */
+		_restore_fp(current);
+
+		/*
+		 * The task has not formerly used MSA, so clear the upper 64b
+		 * of each vector register such that it cannot see data left
+		 * behind by another task.
+		 */
+		_init_msa_upper();
+	} else {
+		/* prior_msa: We need to restore the vector context. */
+		if (!was_fpu_owner) {
+			restore_msa(current);
+			write_32bit_cp1_register(CP1_STATUS,current->thread.fpu.fcr31);
+		} else {
+			_restore_msa_uppers_from_thread(&current->thread.fpu.fpr[0]);
+		}
+	}
+
+out:
+	preempt_enable();
+
+	return 0;
+}
+
 asmlinkage void do_cpu(struct pt_regs *regs)
 {
 	unsigned int __user *epc;
@@ -1172,22 +1305,9 @@ asmlinkage void do_cpu(struct pt_regs *regs)
 		/* Fall through.  */
 
 	case 1:
-		status = 0;
-		if (used_math())	/* Using the FPU again.  */
-			status = own_fpu(1);
-		else {			/* First time FPU user.  */
-			status = init_fpu();
-#ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
-			if (status && !mipsr2_emulation) {
-#else
-			if (status) {
-#endif
-				force_sig(SIGFPE, current);
-				return;
-			}
-
-			set_used_math();
-		}
+		status = enable_restore_fp_context(0);
+		if (status < 0)
+			return;
 
 		if ((!raw_cpu_has_fpu) || status) {
 			int sig;
@@ -1207,6 +1327,30 @@ asmlinkage void do_cpu(struct pt_regs *regs)
 	}
 
 	force_sig(SIGILL, current);
+}
+
+asmlinkage void do_msa_fpe(struct pt_regs *regs)
+{
+	die_if_kernel("do_msa_fpe invoked from kernel context!", regs);
+	force_sig(SIGFPE, current);
+}
+
+asmlinkage void do_msa(struct pt_regs *regs)
+{
+	int err;
+
+	if ((!cpu_has_msa) || !test_thread_local_flags(LTIF_FPU_FR)) {
+		force_sig(SIGILL, current);
+		goto out;
+	}
+
+	die_if_kernel("do_msa invoked from kernel context!", regs);
+
+	err = enable_restore_fp_context(1);
+	if (err)
+		force_sig(SIGILL, current);
+out:
+	;
 }
 
 asmlinkage void do_mdmx(struct pt_regs *regs)
@@ -1380,6 +1524,7 @@ static inline void parity_protection_init(void)
 	case CPU_1004K:
 	case CPU_PROAPTIV:
 	case CPU_INTERAPTIV:
+	case CPU_SAMURAI:
 		{
 #define ERRCTL_PE	0x80000000
 #define ERRCTL_L2P	0x00800000
@@ -1847,7 +1992,7 @@ void __cpuinit per_cpu_trap_init(bool is_boot_cpu)
 
 	if (cpu_has_veic || cpu_has_vint) {
 		unsigned long sr = set_c0_status(ST0_BEV);
-#ifdef CONFIG_EVA
+#if defined(CONFIG_EVA) || defined(CONFIG_CPU_MIPS64_R6)
 		write_c0_ebase(ebase|MIPS_EBASE_WG);
 		back_to_back_c0_hazard();
 #endif
@@ -2060,6 +2205,7 @@ void __init trap_init(void)
 	set_except_vector(11, handle_cpu);
 	set_except_vector(12, handle_ov);
 	set_except_vector(13, handle_tr);
+	set_except_vector(14, handle_msa_fpe);
 
 	if (current_cpu_type() == CPU_R6000 ||
 	    current_cpu_type() == CPU_R6000A) {
@@ -2089,6 +2235,7 @@ void __init trap_init(void)
 		set_except_vector(20, tlb_do_page_fault_0);
 	}
 
+	set_except_vector(21, handle_msa);
 	set_except_vector(22, handle_mdmx);
 
 	if (cpu_has_mcheck)
