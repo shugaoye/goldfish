@@ -1864,7 +1864,7 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 					goto preempt_fault;
 				mtc1_pair(value, value2, insn.i_format.rt);
 			}
-			preempt_enable();
+			preempt_enable_no_resched();
 			compute_return_epc(regs);
 			break;
 		}
@@ -1907,7 +1907,7 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 				if (res)
 					goto preempt_fault;
 			}
-			preempt_enable();
+			preempt_enable_no_resched();
 			break;
 		}
 
@@ -1975,9 +1975,9 @@ fpu_continue:
 #else
 				msa_to_wd(wd, msadata);
 #endif
-				preempt_enable();
+				preempt_enable_no_resched();
 			} else {
-				preempt_enable();
+				preempt_enable_no_resched();
 #ifdef __BIG_ENDIAN
 				msa_convert(&current->thread.fpu.fpr[wd], msadata, df);
 #else
@@ -1996,9 +1996,9 @@ fpu_continue:
 #else
 				msa_from_wd(wd, msadata);
 #endif
-				preempt_enable();
+				preempt_enable_no_resched();
 			} else {
-				preempt_enable();
+				preempt_enable_no_resched();
 #ifdef __BIG_ENDIAN
 				msa_convert(msadata, &current->thread.fpu.fpr[wd], df);
 #else
@@ -2458,7 +2458,7 @@ void emulate_load_store_microMIPS(struct pt_regs *regs, void __user * addr)
 					goto preempt_fault;
 				mtc1_pair(value, value2, insn.mm_i_format.rt);
 			}
-			preempt_enable();
+			preempt_enable_no_resched();
 			goto success;
 		}
 
@@ -2499,7 +2499,7 @@ void emulate_load_store_microMIPS(struct pt_regs *regs, void __user * addr)
 				if (res)
 					goto preempt_fault;
 			}
-			preempt_enable();
+			preempt_enable_no_resched();
 			goto success;
 		}
 

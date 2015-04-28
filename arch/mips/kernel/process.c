@@ -186,12 +186,12 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 int dump_fpu(struct pt_regs *regs, elf_fpregset_t *r)
 {
 	int i;
+	elf_greg_t fr, *p = (elf_greg_t *)r;
 
-	for (i = 0; i < NUM_FPU_REGS; i++)
-		memcpy(&r[i], &current->thread.fpu.fpr[i], sizeof(*r));
-
-	memcpy(&r[NUM_FPU_REGS], &current->thread.fpu.fcr31,
-	       sizeof(current->thread.fpu.fcr31));
+	for (i = 0; i < NUM_FPU_REGS; i++) {
+		fr = get_fpr64(&current->thread.fpu.fpr[i], 0);
+		p[i] = fr;
+	}
 
 	return 1;
 }
@@ -227,12 +227,12 @@ int dump_task_regs(struct task_struct *tsk, elf_gregset_t *regs)
 int dump_task_fpu(struct task_struct *t, elf_fpregset_t *fpr)
 {
 	int i;
+	elf_greg_t fr, *p = (elf_greg_t *)fpr;
 
-	for (i = 0; i < NUM_FPU_REGS; i++)
-		memcpy(&fpr[i], &t->thread.fpu.fpr[i], sizeof(*fpr));
-
-	memcpy(&fpr[NUM_FPU_REGS], &t->thread.fpu.fcr31,
-	       sizeof(t->thread.fpu.fcr31));
+	for (i = 0; i < NUM_FPU_REGS; i++) {
+		fr = get_fpr64(&t->thread.fpu.fpr[i], 0);
+		p[i] = fr;
+	}
 
 	return 1;
 }

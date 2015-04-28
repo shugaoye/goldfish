@@ -28,6 +28,13 @@
 #include <asm/spram.h>
 #include <asm/uaccess.h>
 
+/* Hardware capabilities */
+#ifdef CONFIG_CPU_MIPSR6
+unsigned int elf_hwcap __read_mostly = HWCAP_MIPS_R6;
+#else
+unsigned int elf_hwcap __read_mostly;
+#endif
+
 static int __cpuinitdata mips_fpu_disabled;
 
 static int __init fpu_disable(char *s)
@@ -219,6 +226,49 @@ static void __cpuinit set_isa(struct cpuinfo_mips *c, unsigned int isa)
 		c->isa_level |= MIPS_CPU_ISA_I;
 		break;
 	}
+}
+
+static void report_kernel(void)
+{
+	printk("Kernel:");
+#ifdef CONFIG_CPU_BIG_ENDIAN
+	printk(" EB");
+#endif
+#ifdef CONFIG_CPU_LITTLE_ENDIAN
+	printk(" EL");
+#endif
+#ifdef CONFIG_64BIT
+	printk(" 64bit, 64bit address");
+#elif defined(CONFIG_CPU_MIPS64)
+	printk(" 64bit, 32bit address");
+#else
+	printk(" 32bit");
+#endif
+#ifdef CONFIG_CPU_MIPSR6
+	printk(", R6");
+#endif
+#ifdef CONFIG_CPU_HAS_MSA
+	printk(", MSA");
+#endif
+#ifdef CONFIG_MIPS_HARDWARE_TRACE
+	printk(", HW trace");
+#endif
+#ifdef CONFIG_NO_HZ_IDLE
+	printk(", dynamic ticks");
+#else
+	printk(", periodic ticks");
+#endif
+	printk(" %dHz",CONFIG_HZ);
+#ifdef CONFIG_HIGH_RES_TIMERS
+	printk(", HiRes timers");
+#endif
+#ifdef CONFIG_DMA_COHERENT
+	printk(", coherent DMA");
+#endif
+#ifdef CONFIG_DMA_NONCOHERENT
+	printk(", non-coherent DMA");
+#endif
+	printk(", pagesize=%dKiB\n",(1 << (PAGE_SHIFT - 10)));
 }
 
 static char unknown_isa[] __cpuinitdata = KERN_ERR \
@@ -980,6 +1030,7 @@ static inline void cpu_probe_mips(struct cpuinfo_mips *c, unsigned int cpu)
 		__cpu_name[cpu] = "MIPS Samurai UP";
 		break;
 	}
+	report_kernel();
 	decode_configs(c);
 
 	spram_config();
@@ -1338,6 +1389,7 @@ __cpuinit void cpu_probe(void)
 		c->msa_id = cpu_get_msa_id();
 		WARN(c->msa_id & MSA_IR_WRPF,
 		     "Vector register partitioning unimplemented!");
+		elf_hwcap |= HWCAP_MIPS_MSA;
 	}
 
 	cpu_probe_vmbits(c);

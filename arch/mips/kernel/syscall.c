@@ -26,6 +26,7 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/elf.h>
+#include <linux/prctl.h>
 
 #include <asm/asm.h>
 #include <asm/branch.h>
@@ -216,7 +217,7 @@ void mips_switch_fpu_mode(void *info)
 {
 	struct mm_struct *mm = info;
 
-	if ((current->mm == mm) && is_fpu_owner())
+	if ((current->mm == mm) && (is_fpu_owner() || is_msa_enabled()))
 		set_thread_flag(TIF_FPU_LOSE_REQUEST);
 }
 
@@ -306,6 +307,22 @@ unsigned int mips_fpu_prctl(unsigned long type, unsigned long param)
 	}
 
 	return 0;
+}
+
+long mips_get_process_fp_mode(struct task_struct *task)
+{
+	unsigned long val;
+
+	val = (((struct thread_info *)task_stack_page(task))->local_flags & LTIF_FPU_FR)? PR_FP_MODE_FR : 0;
+	val |= (((struct thread_info *)task_stack_page(task))->local_flags & LTIF_FPU_FRE)? PR_FP_MODE_FRE : 0;
+
+	return val;
+}
+
+long mips_set_process_fp_mode(struct task_struct *task,
+				    unsigned long value)
+{
+	return mips_fpu_prctl(PR_SET_FP_MODE, value);
 }
 
 SYSCALL_DEFINE3(sysmips, long, cmd, long, arg1, long, arg2)

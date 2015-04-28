@@ -43,6 +43,7 @@ config MIPS
 	select MODULES_USE_ELF_REL if MODULES
 	select MODULES_USE_ELF_RELA if MODULES && 64BIT
 	select CLONE_BACKWARDS
+	select ARCH_BINFMT_ELF_STATE
 
 menu "Machine selection"
 
