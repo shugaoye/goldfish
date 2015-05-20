@@ -1060,15 +1060,20 @@ static inline int cop1_64bit(struct pt_regs *xcp)
 	return test_thread_local_flags(LTIF_FPU_FR);
 }
 
+static inline bool hybrid_fprs(void)
+{
+	return test_thread_local_flags(LTIF_FPU_FRE);
+}
+
 #define SIFROMREG(si, x) do {						\
-	if (cop1_64bit(xcp))						\
+	if (cop1_64bit(xcp) && !hybrid_fprs())                          \
 		(si) = (int)get_fpr32(&ctx->fpr[x], 0);			\
 	else								\
 		(si) = (int)get_fpr32(&ctx->fpr[(x) & ~1], (x) & 1);	\
 } while (0)
 
 #define SITOREG(si, x) do {						\
-	if (cop1_64bit(xcp)) {						\
+	if (cop1_64bit(xcp) && !hybrid_fprs()) {                        \
 		unsigned i;						\
 		set_fpr32(&ctx->fpr[x], 0, si);				\
 		for (i = 1; i < ARRAY_SIZE(ctx->fpr[x].val32); i++)	\
