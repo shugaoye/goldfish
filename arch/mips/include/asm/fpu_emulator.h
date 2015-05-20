@@ -36,6 +36,8 @@ struct mips_fpu_emulator_stats {
 	local_t cp1ops;
 	local_t cp1xops;
 	local_t errors;
+	local_t sprecision;
+	local_t dprecision;
 };
 
 DECLARE_PER_CPU(struct mips_fpu_emulator_stats, fpuemustats);

@@ -1189,6 +1189,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		u64 val;
 
 		MIPS_FPU_EMU_INC_STATS(loads);
+		MIPS_FPU_EMU_INC_STATS(dprecision);
 
 		if (!access_ok(VERIFY_READ, va, sizeof(u64))) {
 			MIPS_FPU_EMU_INC_STATS(errors);
@@ -1210,6 +1211,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		u64 val;
 
 		MIPS_FPU_EMU_INC_STATS(stores);
+		MIPS_FPU_EMU_INC_STATS(dprecision);
 		DIFROMREG(val, MIPSInst_RT(ir));
 		if (!access_ok(VERIFY_WRITE, va, sizeof(u64))) {
 			MIPS_FPU_EMU_INC_STATS(errors);
@@ -1230,6 +1232,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		u32 val;
 
 		MIPS_FPU_EMU_INC_STATS(loads);
+		MIPS_FPU_EMU_INC_STATS(sprecision);
 		if (!access_ok(VERIFY_READ, va, sizeof(u32))) {
 			MIPS_FPU_EMU_INC_STATS(errors);
 			*fault_addr = va;
@@ -1250,6 +1253,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		u32 val;
 
 		MIPS_FPU_EMU_INC_STATS(stores);
+		MIPS_FPU_EMU_INC_STATS(sprecision);
 		SIFROMREG(val, MIPSInst_RT(ir));
 		if (!access_ok(VERIFY_WRITE, va, sizeof(u32))) {
 			MIPS_FPU_EMU_INC_STATS(errors);
@@ -1269,6 +1273,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 
 #if defined(__mips64)
 		case dmfc_op:
+			MIPS_FPU_EMU_INC_STATS(dprecision);
 			/* copregister fs -> gpr[rt] */
 			if (MIPSInst_RT(ir) != 0) {
 				DIFROMREG(xcp->regs[MIPSInst_RT(ir)],
@@ -1277,6 +1282,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			break;
 
 		case dmtc_op:
+			MIPS_FPU_EMU_INC_STATS(dprecision);
 			/* copregister fs <- rt */
 			DITOREG(xcp->regs[MIPSInst_RT(ir)], MIPSInst_RD(ir));
 			break;
@@ -1284,6 +1290,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 
 #if defined(CONFIG_CPU_MIPSR2) || defined(CONFIG_CPU_MIPSR6)
 		case mfhc_op:
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 			/* copregister rd -> gpr[rt] */
 			if (MIPSInst_RT(ir) != 0) {
 				SIFROMHREG(xcp->regs[MIPSInst_RT(ir)],
@@ -1292,12 +1299,14 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			break;
 
 		case mthc_op:
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 			/* copregister rd <- gpr[rt] */
 			SITOHREG(xcp->regs[MIPSInst_RT(ir)], MIPSInst_RD(ir));
 			break;
 #endif
 
 		case mfc_op:
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 			/* copregister rd -> gpr[rt] */
 			if (MIPSInst_RT(ir) != 0) {
 				SIFROMREG(xcp->regs[MIPSInst_RT(ir)],
@@ -1306,6 +1315,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			break;
 
 		case mtc_op:
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 			/* copregister rd <- rt */
 			SITOREG(xcp->regs[MIPSInst_RT(ir)], MIPSInst_RD(ir));
 			break;
@@ -1378,6 +1388,7 @@ static int cop1Emulate(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 
 			reg = MIPSInst_FT(ir);
 			cond = 0;
+			MIPS_FPU_EMU_INC_STATS(dprecision);
 			switch (MIPSInst_RS(ir)) {
 			case bc1eqz_op:
 				if (!(get_fpr64(&current->thread.fpu.fpr[reg], 0) & (__u64)0x1))
@@ -1650,12 +1661,14 @@ static int fpux_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		u32 __user *va;
 		u32 val;
 
+		MIPS_FPU_EMU_INC_STATS(sprecision);
 		switch (MIPSInst_FUNC(ir)) {
 		case lwxc1_op:
 			va = (void __user *) (xcp->regs[MIPSInst_FR(ir)] +
 				xcp->regs[MIPSInst_FT(ir)]);
 
 			MIPS_FPU_EMU_INC_STATS(loads);
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 			if (!access_ok(VERIFY_READ, va, sizeof(u32))) {
 				MIPS_FPU_EMU_INC_STATS(errors);
 				*fault_addr = va;
@@ -1674,6 +1687,7 @@ static int fpux_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 				xcp->regs[MIPSInst_FT(ir)]);
 
 			MIPS_FPU_EMU_INC_STATS(stores);
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 
 			SIFROMREG(val, MIPSInst_FS(ir));
 			if (!access_ok(VERIFY_WRITE, va, sizeof(u32))) {
@@ -1739,12 +1753,14 @@ static int fpux_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		u64 __user *va;
 		u64 val;
 
+		MIPS_FPU_EMU_INC_STATS(dprecision);
 		switch (MIPSInst_FUNC(ir)) {
 		case ldxc1_op:
 			va = (void __user *) (xcp->regs[MIPSInst_FR(ir)] +
 				xcp->regs[MIPSInst_FT(ir)]);
 
 			MIPS_FPU_EMU_INC_STATS(loads);
+			MIPS_FPU_EMU_INC_STATS(dprecision);
 			if (!access_ok(VERIFY_READ, va, sizeof(u64))) {
 				MIPS_FPU_EMU_INC_STATS(errors);
 				*fault_addr = va;
@@ -1763,6 +1779,7 @@ static int fpux_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 				xcp->regs[MIPSInst_FT(ir)]);
 
 			MIPS_FPU_EMU_INC_STATS(stores);
+			MIPS_FPU_EMU_INC_STATS(dprecision);
 			DIFROMREG(val, MIPSInst_FS(ir));
 			if (!access_ok(VERIFY_WRITE, va, sizeof(u64))) {
 				MIPS_FPU_EMU_INC_STATS(errors);
@@ -1849,6 +1866,7 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			ieee754sp(*u) (ieee754sp);
 		} handler;
 
+		MIPS_FPU_EMU_INC_STATS(sprecision);
 		switch (MIPSInst_FUNC(ir)) {
 			/* binary ops */
 		case fadd_op:
@@ -2150,6 +2168,7 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			ieee754dp(*u) (ieee754dp);
 		} handler;
 
+		MIPS_FPU_EMU_INC_STATS(dprecision);
 		switch (MIPSInst_FUNC(ir)) {
 			/* binary ops */
 		case fadd_op:
@@ -2441,12 +2460,14 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 
 		switch (MIPSInst_FUNC(ir)) {
 		case fcvts_op:
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 			/* convert word to single precision real */
 			SPFROMREG(fs, MIPSInst_FS(ir));
 			rv.s = ieee754sp_fint(fs.bits);
 			rfmt = s_fmt;
 			goto copcsr;
 		case fcvtd_op:
+			MIPS_FPU_EMU_INC_STATS(dprecision);
 			/* convert word to double precision real */
 			SPFROMREG(fs, MIPSInst_FS(ir));
 			rv.d = ieee754dp_fint(fs.bits);
@@ -2460,6 +2481,7 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			if (!(MIPSInst_RS(ir) & 0x10))
 				return SIGILL;
 
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 			rv.w = 0;
 			rfmt = s_fmt;
 			SPFROMREG(fs, MIPSInst_FS(ir));
@@ -2508,11 +2530,13 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 
 		switch (MIPSInst_FUNC(ir)) {
 		case fcvts_op:
+			MIPS_FPU_EMU_INC_STATS(sprecision);
 			/* convert long to single precision real */
 			rv.s = ieee754sp_flong(bits);
 			rfmt = s_fmt;
 			goto copcsr;
 		case fcvtd_op:
+			MIPS_FPU_EMU_INC_STATS(dprecision);
 			/* convert long to double precision real */
 			rv.d = ieee754dp_flong(bits);
 			rfmt = d_fmt;
@@ -2525,6 +2549,7 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 			if (!(MIPSInst_RS(ir) & 0x10))
 				return SIGILL;
 
+			MIPS_FPU_EMU_INC_STATS(dprecision);
 			rv.ll = 0;
 			rfmt = d_fmt;
 			DPFROMREG(fs, MIPSInst_FS(ir));
@@ -2771,6 +2796,8 @@ static int __init debugfs_fpuemu(void)
 	FPU_STAT_CREATE(cp1ops);
 	FPU_STAT_CREATE(cp1xops);
 	FPU_STAT_CREATE(errors);
+	FPU_STAT_CREATE(sprecision);
+	FPU_STAT_CREATE(dprecision);
 
 	return 0;
 }
