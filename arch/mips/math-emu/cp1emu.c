@@ -1978,6 +1978,24 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 #endif /* __mips >= 2 */
 
 #ifdef CONFIG_CPU_MIPSR6
+		case fseleqz_op:{
+			SPFROMREG(rv.s, MIPSInst_FT(ir));
+			if (rv.w & 0x1)
+				rv.w = 0;
+			else
+				SPFROMREG(rv.s, MIPSInst_FS(ir));
+			break;
+		}
+
+		case fselnez_op:{
+			SPFROMREG(rv.s, MIPSInst_FT(ir));
+			if (rv.w & 0x1)
+				SPFROMREG(rv.s, MIPSInst_FS(ir));
+			else
+				rv.w = 0;
+			break;
+		}
+
 		case frint_op:{
 			ieee754sp fs;
 
@@ -2250,6 +2268,24 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 #endif
 
 #ifdef CONFIG_CPU_MIPSR6
+		case fseleqz_op:{
+			DPFROMREG(rv.d, MIPSInst_FT(ir));
+			if (rv.ll & 0x1)
+				rv.ll = 0;
+			else
+				DPFROMREG(rv.d, MIPSInst_FS(ir));
+			break;
+		}
+
+		case fselnez_op:{
+			DPFROMREG(rv.d, MIPSInst_FT(ir));
+			if (rv.ll & 0x1)
+				DPFROMREG(rv.d, MIPSInst_FS(ir));
+			else
+				rv.ll = 0;
+			break;
+		}
+
 		case frint_op:{
 			ieee754dp fs;
 
