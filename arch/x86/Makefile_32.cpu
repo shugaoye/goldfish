@@ -45,6 +45,9 @@ cflags-$(CONFIG_MGEODE_LX)	+= $(call cc-option,-march=geode,-march=pentium-mmx)
 # cpu entries
 cflags-$(CONFIG_X86_GENERIC) 	+= $(call tune,generic,$(call tune,i686))
 
+# Android qemu support
+cflags-$(CONFIG_X86_GOLDFISH)   += -mfpmath=387
+
 # Work around the pentium-mmx code generator madness of gcc4.4.x which
 # does stack alignment by generating horrible code _before_ the mcount
 # prologue (push %ebp, mov %esp, %ebp) which breaks the function graph
