@@ -1915,8 +1915,18 @@ preempt_fault:
 		preempt_enable();
 		goto fpu_continue;
 
-	case ldxc1_op:
-	case sdxc1_op:
+	case cop1x_op:
+		switch (insn.f_format.func) {
+			case lwxc1_op:
+			case swxc1_op:
+			case ldxc1_op:
+			case sdxc1_op:
+				goto fpu_continue;
+			default:
+				goto sigill;
+		}
+		break;
+
 	case lwc1_op:
 	case swc1_op:
 fpu_continue:
