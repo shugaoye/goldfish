@@ -44,6 +44,7 @@ config MIPS
 	select MODULES_USE_ELF_RELA if MODULES && 64BIT
 	select CLONE_BACKWARDS
 	select ARCH_BINFMT_ELF_STATE
+	select HAVE_CMPXCHG_LOCAL
 
 menu "Machine selection"
 
