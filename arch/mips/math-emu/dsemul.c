@@ -19,6 +19,95 @@
 
 #include "ieee754.h"
 
+#ifdef CONFIG_CPU_MIPSR6
+
+static int mipsr6_pc(struct pt_regs *regs, mips_instruction inst, unsigned long cpc,
+		     unsigned long bpc, unsigned long r31)
+{
+	union mips_instruction ir = (union mips_instruction)inst;
+	register unsigned long vaddr;
+	unsigned int val;
+	int err = SIGILL;
+
+	if (ir.rel_format.opcode != pcrel_op)
+		return SIGILL;
+
+	switch (ir.rel_format.op) {
+	case addiupc_op:
+		vaddr = regs->cp0_epc + (ir.rel_format.simmediate << 2);
+		if (config_enabled(CONFIG_64BIT) && !(regs->cp0_status & ST0_UX))
+			__asm__ __volatile__("sll %0, %0, 0":"+&r"(vaddr)::);
+		regs->regs[ir.rel_format.rs] = vaddr;
+		return 0;
+#ifdef CONFIG_CPU_MIPS64
+	case lwupc_op:
+		vaddr = regs->cp0_epc + (ir.rel_format.simmediate << 2);
+		if (config_enabled(CONFIG_64BIT) && !(regs->cp0_status & ST0_UX))
+			__asm__ __volatile__("sll %0, %0, 0":"+&r"(vaddr)::);
+		if (get_user(val, (u32 __user *)vaddr)) {
+			current->thread.cp0_baduaddr = vaddr;
+			err = SIGSEGV;
+			break;
+		}
+		regs->regs[ir.rel_format.rs] = val;
+		return 0;
+#endif
+	case lwpc_op:
+		vaddr = regs->cp0_epc + (ir.rel_format.simmediate << 2);
+		if (config_enabled(CONFIG_64BIT) && !(regs->cp0_status & ST0_UX))
+			__asm__ __volatile__("sll %0, %0, 0":"+&r"(vaddr)::);
+		if (get_user(val, (u32 __user *)vaddr)) {
+			current->thread.cp0_baduaddr = vaddr;
+			err = SIGSEGV;
+			break;
+		}
+		regs->regs[ir.rel_format.rs] = (int)val;
+		return 0;
+	default:
+		switch (ir.rl16_format.func) {
+		case aluipc_func:
+			vaddr = regs->cp0_epc + (ir.rl16_format.simmediate << 16);
+			if (config_enabled(CONFIG_64BIT) &&
+			    !(regs->cp0_status & ST0_UX))
+				__asm__ __volatile__("sll %0, %0, 0":"+&r"(vaddr)::);
+			vaddr &= ~0xffff;
+			regs->regs[ir.rel_format.rs] = vaddr;
+			return 0;
+		case auipc_func:
+			vaddr = regs->cp0_epc + (ir.rl16_format.simmediate << 16);
+			if (config_enabled(CONFIG_64BIT) &&
+			    !(regs->cp0_status & ST0_UX))
+				__asm__ __volatile__("sll %0, %0, 0":"+&r"(vaddr)::);
+			regs->regs[ir.rel_format.rs] = vaddr;
+			return 0;
+		default: {
+#ifdef CONFIG_CPU_MIPS64
+				unsigned long dval;
+
+				if (ir.rl18_format.unused)
+					break;
+				/* LDPC */
+				vaddr = regs->cp0_epc & ~0x7;
+				vaddr += (ir.rl18_format.simmediate << 3);
+				if (config_enabled(CONFIG_64BIT) &&
+				    !(regs->cp0_status & ST0_UX))
+					__asm__ __volatile__("sll %0, %0, 0":"+&r"(vaddr)::);
+				if (get_user(dval, (u64 __user *)vaddr)) {
+					current->thread.cp0_baduaddr = vaddr;
+					err = SIGSEGV;
+					break;
+				}
+				regs->regs[ir.rel_format.rs] = dval;
+				return 0;
+#endif
+			}
+		}
+		break;
+	}
+	return err;
+}
+#endif
+
 /* Strap kernel emulator for full MIPS IV emulation */
 
 #ifdef __mips
@@ -74,6 +163,11 @@ int mips_dsemul(struct pt_regs *regs, mips_instruction ir, unsigned long cpc,
 
 #endif
 
+#ifdef CONFIG_CPU_MIPSR6
+	err = mipsr6_pc(regs, ir, cpc, bpc, r31);
+	if (err != SIGILL)
+		return err;
+#endif
 	/*
 	 * The strategy is to push the instruction onto the user stack/VDSO page
 	 * and put a trap after it which we can catch and jump to

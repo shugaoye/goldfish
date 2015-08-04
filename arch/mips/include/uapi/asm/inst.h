@@ -44,7 +44,7 @@ enum major_op {
 #else
 	ll_op, lwc1_op, bc_op, pref_op,
 	lld_op, ldc1_op, jump_op, ld_op,
-	sc_op, swc1_op, balc_op, major_3b_op,
+	sc_op, swc1_op, balc_op, pcrel_op,
 	scd_op, sdc1_op, jump2_op, sd_op
 #endif
 };
@@ -235,6 +235,17 @@ enum lx_func {
 enum msa_mi10_func {
 	msa_ld_op = 8,
 	msa_st_op = 9,
+};
+
+enum relpc_op {
+	addiupc_op  = 0,
+	lwpc_op     = 1,
+	lwupc_op    = 2,
+};
+
+enum relpc_func {
+	auipc_func  = 6,
+	aluipc_func = 7,
 };
 
 /*
@@ -651,6 +662,31 @@ struct msa_mi10_format {        /* MSA */
 	;))))))
 };
 
+struct rel_format {        /* PC-relative */
+	BITFIELD_FIELD(unsigned int opcode : 6,
+	BITFIELD_FIELD(unsigned int rs : 5,
+	BITFIELD_FIELD(unsigned int op : 2,
+	BITFIELD_FIELD(signed int simmediate : 19,
+	;))))
+};
+
+struct rl16_format {        /* PC-relative, 16bit offset */
+	BITFIELD_FIELD(unsigned int opcode : 6,
+	BITFIELD_FIELD(unsigned int rs : 5,
+	BITFIELD_FIELD(unsigned int op : 2,
+	BITFIELD_FIELD(unsigned int func : 3,
+	BITFIELD_FIELD(signed int simmediate : 16,
+	;)))))
+};
+
+struct rl18_format {        /* PC-relative, 18bit offset */
+	BITFIELD_FIELD(unsigned int opcode : 6,
+	BITFIELD_FIELD(unsigned int rs : 5,
+	BITFIELD_FIELD(unsigned int op : 2,
+	BITFIELD_FIELD(unsigned int unused : 1,
+	BITFIELD_FIELD(signed int simmediate : 18,
+	;)))))
+};
 
 /*
  * microMIPS instruction formats (32-bit length)
@@ -922,6 +958,9 @@ union mips_instruction {
 	struct f_format f_format;
 	struct ma_format ma_format;
 	struct msa_mi10_format msa_mi10_format;
+	struct rel_format rel_format;
+	struct rl16_format rl16_format;
+	struct rl18_format rl18_format;
 	struct b_format b_format;
 	struct ps_format ps_format;
 	struct v_format v_format;
