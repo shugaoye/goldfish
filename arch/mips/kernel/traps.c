@@ -268,7 +268,7 @@ static void __show_regs(const struct pt_regs *regs)
 
 	printk("Status: %08x	", (uint32_t) regs->cp0_status);
 
-	if (current_cpu_data.isa_level == MIPS_CPU_ISA_I) {
+	if (raw_current_cpu_data.isa_level == MIPS_CPU_ISA_I) {
 		if (regs->cp0_status & ST0_KUO)
 			printk("KUo ");
 		if (regs->cp0_status & ST0_IEO)
