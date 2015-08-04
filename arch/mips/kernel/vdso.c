@@ -132,7 +132,7 @@ void mips_thread_vdso(struct thread_info *ti)
 		if (!cpu_has_ic_fills_f_dc)
 			flush_data_cache_page(addr);
 		/* any vma in mmap is used, just to get ASIDs back from mm */
-		local_flush_tlb_page(ti->task->mm->mmap,addr);
+		local_flush_tlb_page(ti->task->mm->mmap,(unsigned long)ti->task->mm->context.vdso);
 	}
 }
 
@@ -142,7 +142,7 @@ void arch_release_thread_info(struct thread_info *info)
 		if (info->task->mm) {
 			preempt_disable();
 			/* any vma in mmap is used, just to get ASIDs */
-			local_flush_tlb_page(info->task->mm->mmap,(unsigned long)page_address(info->vdso_page));
+			local_flush_tlb_page(info->task->mm->mmap,(unsigned long)info->task->mm->context.vdso);
 			info->task->mm->context.vdso_asid[smp_processor_id()] = 0;
 			preempt_enable();
 		}
