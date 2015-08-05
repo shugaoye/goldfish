@@ -94,7 +94,11 @@
 #define CPU_ID_REG CP0_XCONTEXT
 #define CPU_ID_MFC0 MFC0
 #else
+#ifdef CONFIG_64BIT
+#define PTEBASE_SHIFT   24      /* CONTEXT using double 2 ptrs */
+#else
 #define PTEBASE_SHIFT	23	/* CONTEXT */
+#endif
 #define CPU_ID_REG CP0_CONTEXT
 #define CPU_ID_MFC0 MFC0
 #endif

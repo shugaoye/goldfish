@@ -55,7 +55,7 @@ struct tlb_reg_save {
 	unsigned long b;
 } ____cacheline_aligned_in_smp;
 
-static struct tlb_reg_save handler_reg_save[NR_CPUS];
+static struct tlb_reg_save handler_reg_save[NR_CPUS * 2];
 
 static inline int r45k_bvahwbug(void)
 {
@@ -2290,6 +2290,16 @@ static void config_htw_params(void)
 	/* re-initialize the GDI field */
 	pwfield &= ~MIPS_PWFIELD_GDI_MASK;
 	pwfield |= PGDIR_SHIFT << MIPS_PWFIELD_GDI_SHIFT;
+#ifdef CONFIG_64BIT
+#if defined(CONFIG_48VMBITS) || !defined(CONFIG_PAGE_SIZE_64KB)
+	/* re-initialize the MDI field */
+	pwfield &= ~MIPS_PWFIELD_MDI_MASK;
+	pwfield |= PMD_SHIFT << MIPS_PWFIELD_MDI_SHIFT;
+	/* re-initialize the BDI field */
+	pwfield &= ~MIPS_PWFIELD_BDI_MASK;
+	pwfield |= MIPS_BASE_SHIFT << MIPS_PWFIELD_BDI_SHIFT;
+#endif
+#endif
 	/* re-initialize the PTI field including the even/odd bit */
 	pwfield &= ~MIPS_PWFIELD_PTI_MASK;
 	pwfield |= PAGE_SHIFT << MIPS_PWFIELD_PTI_SHIFT;
@@ -2313,6 +2323,13 @@ static void config_htw_params(void)
 	}
 
 	pwsize = ilog2(PTRS_PER_PGD) << MIPS_PWSIZE_GDW_SHIFT;
+#ifdef CONFIG_64BIT
+	pwsize |= MIPS_BASE_SIZE;
+	pwsize |= MIPS_PWSIZE_PS;
+#if defined(CONFIG_48VMBITS) || !defined(CONFIG_PAGE_SIZE_64KB)
+	pwsize |= ilog2(PTRS_PER_PMD) << MIPS_PWSIZE_MDW_SHIFT;
+#endif
+#endif
 	pwsize |= ilog2(PTRS_PER_PTE) << MIPS_PWSIZE_PTW_SHIFT;
 	write_c0_pwsize(pwsize);
 

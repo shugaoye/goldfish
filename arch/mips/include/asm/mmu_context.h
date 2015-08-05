@@ -61,19 +61,24 @@ do {									\
  */
 extern unsigned long pgd_current[];
 
+#ifdef CONFIG_32BIT
 #define TLBMISS_HANDLER_SETUP_PGD(pgd) \
 	pgd_current[smp_processor_id()] = (unsigned long)(pgd);         \
 	htw_set_pwbase((unsigned long)pgd);
 
-#ifdef CONFIG_32BIT
 #define TLBMISS_HANDLER_SETUP()						\
 	write_c0_context((unsigned long) smp_processor_id() << 25);	\
 	back_to_back_c0_hazard();					\
 	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir);
 #endif
 #ifdef CONFIG_64BIT
+#define TLBMISS_HANDLER_SETUP_PGD(pgd) \
+	pgd_current[2 * smp_processor_id()] = (unsigned long)(pgd);         \
+	pgd_current[(2 *smp_processor_id())+1] = (unsigned long)(swapper_pg_dir);         \
+	htw_set_pwbase((unsigned long)pgd);
+
 #define TLBMISS_HANDLER_SETUP()						\
-	write_c0_context((unsigned long) smp_processor_id() << 26);	\
+	write_c0_context((unsigned long) smp_processor_id() << 27);     \
 	back_to_back_c0_hazard();					\
 	TLBMISS_HANDLER_SETUP_PGD(swapper_pg_dir);
 #endif

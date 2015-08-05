@@ -59,6 +59,10 @@
 #define PGDIR_SIZE	(1UL << PGDIR_SHIFT)
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
+/* Hardware Page Walker definitions - one bit detects user or system PGD */
+#define MIPS_BASE_SHIFT         63UL
+#define MIPS_BASE_SIZE          1UL
+
 /*
  * For 4kB page size we use a 3 level page tree and an 8kB pud, which
  * permits us mapping 40 bits of virtual address space.

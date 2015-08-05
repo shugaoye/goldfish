@@ -407,7 +407,7 @@ static inline unsigned int decode_config3(struct cpuinfo_mips *c)
 	if (config3 & MIPS_CONF3_SC)
 		c->options |= MIPS_CPU_SEGMENTS;
 	/* Only tested on 32-bit cores */
-	if ((config3 & MIPS_CONF3_PW) && config_enabled(CONFIG_32BIT))
+	if (config3 & MIPS_CONF3_PW && !config_enabled(CONFIG_MIPS_PGD_C0_CONTEXT))
 		c->options2 |= MIPS_CPU_HTW;
 	if (config3 & MIPS_CONF3_MSA)
 		c->ases |= MIPS_ASE_MSA;

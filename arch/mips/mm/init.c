@@ -474,7 +474,7 @@ void __init_refok free_initmem(void)
 }
 
 #ifndef CONFIG_MIPS_PGD_C0_CONTEXT
-unsigned long pgd_current[NR_CPUS];
+unsigned long pgd_current[NR_CPUS * 2];
 #endif
 
 /*
