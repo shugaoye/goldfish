@@ -71,7 +71,11 @@ extern unsigned int vced_count, vcei_count;
  * 8192EB ...
  */
 #define TASK_SIZE32	0x7fff8000UL
-#define TASK_SIZE64	0x10000000000UL
+#ifdef CONFIG_48VMBITS
+#define TASK_SIZE64     (0x1UL << ((cpu_data[0].vmbits>48)?48:cpu_data[0].vmbits))
+#else
+#define TASK_SIZE64     (0x10000000000UL)
+#endif
 #define TASK_SIZE (test_thread_flag(TIF_32BIT_ADDR) ? TASK_SIZE32 : TASK_SIZE64)
 
 #ifdef __KERNEL__

@@ -1930,6 +1930,17 @@ config PAGE_SIZE_64KB
 
 endchoice
 
+config 48VMBITS
+	bool "48 bits virtual memory"
+	depends on PAGE_SIZE_16KB || PAGE_SIZE_64KB
+	depends on 64BIT
+	help
+	  Define a maximum at least 48 bits of application virtual memory.
+	  Default is 40 bits or less, depending from CPU.
+	  In generic (small) application it is a small set of pages increase
+	  in page tables.
+	  If unsure, say N.
+
 config FORCE_MAX_ZONEORDER
 	int "Maximum zone order"
 	range 14 64 if HUGETLB_PAGE && PAGE_SIZE_64KB

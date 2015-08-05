@@ -239,6 +239,11 @@ static void report_kernel(void)
 #endif
 #ifdef CONFIG_64BIT
 	printk(" 64bit, 64bit address");
+#ifdef CONFIG_48VMBITS
+	printk(", 48 segbits");
+#else
+	printk(", 40 segbits");
+#endif
 #elif defined(CONFIG_CPU_MIPS64)
 	printk(" 64bit, 32bit address");
 #else
