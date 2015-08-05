@@ -99,7 +99,6 @@ do {									\
 	if (test_and_clear_tsk_thread_flag(prev, TIF_USEDMSA))		\
 		__fpsave = FP_SAVE_VECTOR;				\
 	(last) = resume(prev, next, task_thread_info(next), __fpsave);	\
-	disable_msa();							\
 } while (0)
 
 static inline void flush_vdso_page(void)

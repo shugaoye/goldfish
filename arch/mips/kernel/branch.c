@@ -504,12 +504,11 @@ int __compute_return_epc_for_insn(struct pt_regs *regs,
 
 			if (!used_math()) {     /* First time FPU user.  */
 				ret = init_fpu();
-				if (ret && !mipsr2_emulation) {
+				if (ret && raw_cpu_has_fpu && !mipsr2_emulation) {
 					ret = -ret;
 					break;
 				}
 				ret = 0;
-				set_used_math();
 			}
 			lose_fpu(1);    /* Save FPU state for the emulator. */
 			reg = insn.i_format.rt;

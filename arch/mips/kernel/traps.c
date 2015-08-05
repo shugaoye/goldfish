@@ -1121,9 +1121,7 @@ static int enable_restore_fp_context(int msa)
 			set_thread_flag(TIF_MSA_CTX_LIVE);
 		}
 		preempt_enable();
-		if (!err)
-			set_used_math();
-		else
+		if (err && raw_cpu_has_fpu)
 #ifdef CONFIG_MIPS_INCOMPATIBLE_ARCH_EMULATION
 			if (!mipsr2_emulation)
 #endif

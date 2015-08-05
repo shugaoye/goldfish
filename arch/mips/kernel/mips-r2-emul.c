@@ -930,10 +930,8 @@ fpu_emul:
 		regs->regs[31] = r31;
 		regs->cp0_epc = epc;
 		/* all cop1/cop1x RI in R6 are a removed R5 FPU instructions */
-		if (!used_math()) {     /* First time FPU user.  */
-			err = init_fpu();
-			set_used_math();
-		}
+		if (!used_math())       /* First time FPU user.  */
+			init_fpu();
 		lose_fpu(1);    /* Save FPU state for the emulator. */
 
 		err = fpu_emulator_cop1Handler(regs, &current->thread.fpu, 0,

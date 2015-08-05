@@ -208,6 +208,8 @@ static inline int init_fpu(void)
 
 	preempt_enable();
 
+	set_used_math();
+
 	return ret;
 }
 

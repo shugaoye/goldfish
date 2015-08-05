@@ -2523,24 +2523,30 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		break;
 	}
 
-#if defined(__mips64)
 	case l_fmt:{
-		u64 bits;
-		DIFROMREG(bits, MIPSInst_FS(ir));
-
 		switch (MIPSInst_FUNC(ir)) {
-		case fcvts_op:
+#if defined(__mips64)
+		case fcvts_op: {
+			u64 bits;
 			MIPS_FPU_EMU_INC_STATS(sprecision);
+			DIFROMREG(bits, MIPSInst_FS(ir));
+
 			/* convert long to single precision real */
 			rv.s = ieee754sp_flong(bits);
 			rfmt = s_fmt;
 			goto copcsr;
-		case fcvtd_op:
+		}
+		case fcvtd_op: {
+			u64 bits;
 			MIPS_FPU_EMU_INC_STATS(dprecision);
+			DIFROMREG(bits, MIPSInst_FS(ir));
+
 			/* convert long to double precision real */
 			rv.d = ieee754dp_flong(bits);
 			rfmt = d_fmt;
 			goto copcsr;
+		}
+#endif
 		default: {
 #ifdef CONFIG_CPU_MIPSR6
 			unsigned cmpop = MIPSInst_FUNC(ir) & 0xf;
@@ -2592,7 +2598,6 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 		}
 		break;
 	}
-#endif
 
 	default:
 		return SIGILL;

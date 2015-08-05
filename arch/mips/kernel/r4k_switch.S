@@ -22,6 +22,7 @@
 
 #include <asm/asmmacro.h>
 
+#define t4  $12
 /*
  * Offset to the current process status flags, the first 32 bytes of the
  * stack are not used.
@@ -98,6 +99,11 @@
 	fpu_get_fcr31   a0 t0 t1
 	msa_save_all	a0
 	.set pop	/* SET_HARDFLOAT */
+	li      t4, MIPS_CONF5_MSAEN
+	mfc0    t3, CP0_CONFIG, 5
+	or      t3, t3, t4
+	xor     t3, t3, t4
+	mtc0    t3, CP0_CONFIG, 5
 
 	sw	t1, THREAD_FCR31(a0)
 	b	2f
