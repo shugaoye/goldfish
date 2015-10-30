@@ -2,6 +2,7 @@
  * Compressed RAM block device
  *
  * Copyright (C) 2008, 2009, 2010  Nitin Gupta
+ *               2012, 2013 Minchan Kim
  *
  * This code is released using a dual license strategy: BSD/GPL
  * You can choose the licence that better fits your requirements.
@@ -9,16 +10,15 @@
  * Released under the terms of 3-clause BSD License
  * Released under the terms of GNU General Public License Version 2.0
  *
- * Project home: http://compcache.googlecode.com
  */
 
 #ifndef _ZRAM_DRV_H_
 #define _ZRAM_DRV_H_
 
 #include <linux/spinlock.h>
-#include <linux/mutex.h>
+#include <linux/zsmalloc.h>
 
-#include "../zsmalloc/zsmalloc.h"
+#include "zcomp.h"
 
 /*
  * Some arbitrary value. This is just to catch
@@ -65,39 +65,33 @@ enum zram_pageflags {
 struct table {
 	unsigned long handle;
 	u16 size;	/* object size (excluding header) */
-	u8 count;	/* object ref count (not yet used) */
 	u8 flags;
 } __aligned(4);
 
 struct zram_stats {
-	u64 compr_size;		/* compressed size of pages stored */
-	u64 num_reads;		/* failed + successful */
-	u64 num_writes;		/* --do-- */
-	u64 failed_reads;	/* should NEVER! happen */
-	u64 failed_writes;	/* can happen when memory is too low */
-	u64 invalid_io;		/* non-page-aligned I/O requests */
-	u64 notify_free;	/* no. of swap slot free notifications */
-	u32 pages_zero;		/* no. of zero filled pages */
-	u32 pages_stored;	/* no. of pages currently stored */
-	u32 good_compress;	/* % of pages with compression ratio<=50% */
-	u32 bad_compress;	/* % of pages with compression ratio>=75% */
+	atomic64_t compr_data_size;	/* compressed size of pages stored */
+	atomic64_t num_reads;	/* failed + successful */
+	atomic64_t num_writes;	/* --do-- */
+	atomic64_t failed_reads;	/* should NEVER! happen */
+	atomic64_t failed_writes;	/* can happen when memory is too low */
+	atomic64_t invalid_io;	/* non-page-aligned I/O requests */
+	atomic64_t notify_free;	/* no. of swap slot free notifications */
+	atomic64_t zero_pages;		/* no. of zero filled pages */
+	atomic64_t pages_stored;	/* no. of pages currently stored */
 };
 
 struct zram_meta {
-	void *compress_workmem;
-	void *compress_buffer;
+	rwlock_t tb_lock;	/* protect table */
 	struct table *table;
 	struct zs_pool *mem_pool;
 };
 
 struct zram {
 	struct zram_meta *meta;
-	spinlock_t stat64_lock;	/* protect 64-bit stats */
-	struct rw_semaphore lock; /* protect compression buffers and table
-				   * against concurrent read and writes */
 	struct request_queue *queue;
 	struct gendisk *disk;
-	int init_done;
+	struct zcomp *comp;
+
 	/* Prevent concurrent execution of device init, reset and R/W request */
 	struct rw_semaphore init_lock;
 	/*
@@ -105,19 +99,9 @@ struct zram {
 	 * we can store in a disk.
 	 */
 	u64 disksize;	/* bytes */
-
+	int max_comp_streams;
 	struct zram_stats stats;
+	char compressor[10];
 };
-
-extern struct zram *zram_devices;
-unsigned int zram_get_num_devices(void);
-#ifdef CONFIG_SYSFS
-extern struct attribute_group zram_disk_attr_group;
-#endif
-
-extern void zram_reset_device(struct zram *zram);
-extern struct zram_meta *zram_meta_alloc(u64 disksize);
-extern void zram_meta_free(struct zram_meta *meta);
-extern void zram_init_device(struct zram *zram, struct zram_meta *meta);
 
 #endif
