@@ -45,7 +45,7 @@ enum {
 };
 
 /* These values *must* match the platform definitions found under
- * hardware/libhardware/include/hardware/hardware.h
+ * <system/graphics.h>
  */
 enum {
 	HAL_PIXEL_FORMAT_RGBA_8888          = 1,
@@ -53,39 +53,36 @@ enum {
 	HAL_PIXEL_FORMAT_RGB_888            = 3,
 	HAL_PIXEL_FORMAT_RGB_565            = 4,
 	HAL_PIXEL_FORMAT_BGRA_8888          = 5,
-	HAL_PIXEL_FORMAT_RGBA_5551          = 6,
-	HAL_PIXEL_FORMAT_RGBA_4444          = 7,
 };
 
 struct framebuffer_config {
-	u8 format;
 	u8 bytes_per_pixel;
-	u8 transp_offset;
-	u8 transp_length;
 	u8 red_offset;
 	u8 red_length;
 	u8 green_offset;
 	u8 green_length;
 	u8 blue_offset;
 	u8 blue_length;
+	u8 transp_offset;
+	u8 transp_length;
 };
 
 static const struct framebuffer_config* get_fb_config_from_format(int format) {
-	/* Only configurations supported by the emulator. */
 	static const struct framebuffer_config fb_configs[] = {
-		{ HAL_PIXEL_FORMAT_RGB_565, 2, 0, 0, 11, 5, 5, 6, 0, 5 },
-		{ HAL_PIXEL_FORMAT_RGBX_8888, 4, 0, 0, 16, 8, 8, 8, 0, 8 },
-		{ HAL_PIXEL_FORMAT_RGBA_8888, 4, 24, 8, 16, 8, 8, 8, 0, 8 },
+		{ 0, 0,  0, 0, 0, 0,  0, 0,  0 }, /* Invalid, assume RGB_565 */
+		{ 4, 0,  8, 8, 8, 16, 8, 24, 8 }, /* HAL_PIXEL_FORMAT_RGBA_8888 */
+		{ 4, 0,  8, 8, 8, 16, 8, 0,  0 }, /* HAL_PIXEL_FORMAT_RGBX_8888 */
+		{ 3, 0,  8, 8, 8, 16, 8, 0,  0 }, /* HAL_PIXEL_FORMAT_RGB_888 */
+		{ 2, 11, 5, 5, 6, 0,  5, 0,  0 }, /* HAL_PIXEL_FORMAT_RGB_565 */
+		{ 4, 16, 8, 8, 8, 0,  8, 24, 8 }, /* HAL_PIXEL_FORMAT_BGRA_8888 */
 	};
-	const int fb_configs_size =
-		sizeof(fb_configs) / sizeof(fb_configs[0]);
-	int n;
-	for (n = 0; n < fb_configs_size; ++n) {
-		if (format == fb_configs[n].format) {
-			return &fb_configs[n];
-		}
+
+	if (format > 0 &&
+		format < sizeof(fb_configs) / sizeof(struct framebuffer_config)) {
+		return &fb_configs[format];
 	}
-	return &fb_configs[0]; /* default to RGB565 */
+
+	return &fb_configs[HAL_PIXEL_FORMAT_RGB_565]; /* legacy default */
 }
 
 struct goldfish_fb {
