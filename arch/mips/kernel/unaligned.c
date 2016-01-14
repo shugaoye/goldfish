@@ -1616,9 +1616,39 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 		 * The remaining opcodes are the ones that are really of
 		 * interest.
 		 */
-#ifdef CONFIG_EVA
 	case spec3_op:
+		switch (insn.dsp_format.func) {
+		case lx_op:
+			switch (insn.dsp_format.op) {
+			case lwx_op:
+				if (!access_ok(VERIFY_READ, addr, 4))
+					goto sigbus;
 
+				LoadW(addr, value, res);
+				if (res)
+					goto fault;
+				compute_return_epc(regs);
+				regs->regs[insn.dsp_format.rd] = value;
+				break;
+			case lhx_op:
+				if (!access_ok(VERIFY_READ, addr, 2)) {
+					goto sigbus;
+				}
+
+				LoadHW(addr, value, res);
+				if (res) {
+					goto fault;
+				}
+				compute_return_epc(regs);
+				regs->regs[insn.dsp_format.rd] = value;
+				break;
+			default:
+				goto sigill;
+			}
+			break;
+		}
+
+#ifdef CONFIG_EVA
 		/* we can land here only from kernel accessing USER,
 		   so - set user space, temporary for verification */
 		seg = get_fs();
@@ -1706,8 +1736,8 @@ static void emulate_load_store_insn(struct pt_regs *regs,
 			goto sigill;
 		}
 		set_fs(seg);
-		break;
 #endif
+		break;
 	case lh_op:
 		if (!access_ok(VERIFY_READ, addr, 2))
 			goto sigbus;

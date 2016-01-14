@@ -593,6 +593,16 @@ struct p_format {		/* Performance counter format (R10000) */
 	;))))))
 };
 
+struct dsp_format {		/* SPEC3 DSP format instructions */
+	BITFIELD_FIELD(unsigned int opcode : 6,
+	BITFIELD_FIELD(unsigned int base : 5,
+	BITFIELD_FIELD(unsigned int index : 5,
+	BITFIELD_FIELD(unsigned int rd : 5,
+	BITFIELD_FIELD(unsigned int op : 5,
+	BITFIELD_FIELD(unsigned int func : 6,
+	;))))))
+};
+
 struct spec3_format {   /* SPEC3 */
 	BITFIELD_FIELD(unsigned int opcode : 6,
 	BITFIELD_FIELD(unsigned int rs : 5,
@@ -954,6 +964,7 @@ union mips_instruction {
 	struct c_format c_format;
 	struct r_format r_format;
 	struct p_format p_format;
+	struct dsp_format dsp_format;
 	struct spec3_format spec3_format;
 	struct f_format f_format;
 	struct ma_format ma_format;
