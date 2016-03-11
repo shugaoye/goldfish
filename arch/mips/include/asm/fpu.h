@@ -201,9 +201,16 @@ static inline int init_fpu(void)
 	int ret = 0;
 
 	preempt_disable();
-	if (cpu_has_fpu && !(ret = __own_fpu()))
-		_init_fpu();
-	else
+	if (cpu_has_fpu && !(ret = __own_fpu())) {
+		if (cpu_has_fre) {
+			unsigned int config5 = clear_c0_config5(MIPS_CONF5_FRE);
+			back_to_back_c0_hazard();
+			_init_fpu();
+			write_c0_config5(config5);
+			back_to_back_c0_hazard();
+		} else
+			_init_fpu();
+	} else
 		fpu_emulator_init_fpu(current);
 
 	preempt_enable();
