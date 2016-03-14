@@ -1,0 +1,12 @@
+ARCH=arm
+BRANCH=mirror-aosp-android-goldfish-3.10
+CROSS_COMPILE=arm-linux-androideabi-
+DEFCONFIG=ranchu_defconfig
+EXTRA_CMDS=''
+KERNEL_DIR=goldfish
+LINUX_GCC_CROSS_COMPILE_PREBUILTS_BIN=prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin
+FILES="
+arch/arm/boot/Image
+vmlinux
+System.map
+"
