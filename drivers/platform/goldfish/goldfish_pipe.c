@@ -248,8 +248,10 @@ static int setup_access_params_addr(struct platform_device *pdev,
 	if (valid_batchbuffer_addr(dev, aps)) {
 		dev->aps = aps;
 		return 0;
-	} else
+	} else {
+		devm_kfree(&pdev->dev, aps);
 		return -1;
+	}
 }
 
 /* A value that will not be set by qemu emulator */
