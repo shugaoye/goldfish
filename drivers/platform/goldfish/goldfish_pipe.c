@@ -319,16 +319,14 @@ static ssize_t goldfish_pipe_read_write(struct file *filp, char __user *buffer,
 		/*
 		 * Attempt to grab multiple physically contiguous pages.
 		 */
-		down_read(&current->mm->mmap_sem);
 		first_page = address & PAGE_MASK;
 		last_page = (address_end - 1) & PAGE_MASK;
 		requested_pages = (last_page - first_page + 1);
 		if (requested_pages > MAX_PAGES_TO_GRAB) {
 			requested_pages = MAX_PAGES_TO_GRAB;
 		}
-		ret = get_user_pages(current, current->mm, first_page,
-				requested_pages, !is_write, 0, pages, NULL);
-		up_read(&current->mm->mmap_sem);
+		ret = get_user_pages_fast(first_page, requested_pages,
+				!is_write, pages);
 
 		DPRINT("%s: requested pages: %d %d\n", __FUNCTION__, ret, requested_pages);
 		if (ret == 0) {
