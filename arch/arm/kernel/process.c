@@ -563,8 +563,8 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 #ifdef CONFIG_KUSER_HELPERS
 /*
  * The vectors page is always readable from user space for the
- * atomic helpers. Insert it into the gate_vma so that it is visible
- * through ptrace and /proc/<pid>/mem.
+ * atomic helpers and the signal restart code. Insert it into the
+ * gate_vma so that it is visible through ptrace and /proc/<pid>/mem.
  */
 static struct vm_area_struct gate_vma = {
 	.vm_start	= 0xffff0000,
@@ -600,40 +600,6 @@ int in_gate_area_no_mm(unsigned long addr)
 
 const char *arch_vma_name(struct vm_area_struct *vma)
 {
-	return is_gate_vma(vma) ? "[vectors]" :
-		(vma->vm_mm && vma->vm_start == vma->vm_mm->context.sigpage) ?
-		 "[sigpage]" : NULL;
-}
-
-extern struct page *get_signal_page(void);
-
-int arch_setup_additional_pages(struct linux_binprm *bprm, int uses_interp)
-{
-	struct mm_struct *mm = current->mm;
-	struct page *page;
-	unsigned long addr;
-	int ret;
-
-	page = get_signal_page();
-	if (!page)
-		return -ENOMEM;
-
-	down_write(&mm->mmap_sem);
-	addr = get_unmapped_area(NULL, 0, PAGE_SIZE, 0, 0);
-	if (IS_ERR_VALUE(addr)) {
-		ret = addr;
-		goto up_fail;
-	}
-
-	ret = install_special_mapping(mm, addr, PAGE_SIZE,
-		VM_READ | VM_EXEC | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC,
-		&page);
-
-	if (ret == 0)
-		mm->context.sigpage = addr;
-
- up_fail:
-	up_write(&mm->mmap_sem);
-	return ret;
+	return (vma == &gate_vma) ? "[vectors]" : NULL;
 }
 #endif
