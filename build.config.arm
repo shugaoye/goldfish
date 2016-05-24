@@ -1,6 +1,6 @@
 ARCH=arm
 BRANCH=mirror-aosp-android-goldfish-3.10
-CROSS_COMPILE=arm-linux-androideabi-
+CROSS_COMPILE=arm-eabi-
 DEFCONFIG=ranchu_defconfig
 EXTRA_CMDS=''
 KERNEL_DIR=goldfish
