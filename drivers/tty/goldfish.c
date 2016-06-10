@@ -23,6 +23,7 @@
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/mm.h>
+#include <linux/dma-mapping.h>
 
 enum {
 	GOLDFISH_TTY_PUT_CHAR       = 0x00,
@@ -51,6 +52,7 @@ struct goldfish_tty {
 	int opencount;
 	struct console console;
 	u32 version;
+	struct device *dev;
 };
 
 static DEFINE_MUTEX(goldfish_tty_lock);
@@ -85,9 +87,13 @@ static inline void goldfish_tty_rw(struct goldfish_tty *qtty,
 								   unsigned long address,
 								   unsigned count, int is_write)
 {
+	dma_addr_t dma_handle;
+	enum dma_data_direction dma_dir;
+	dma_dir = (is_write ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+
 	if (qtty->version) {
-		/* Goldfish TTY for Ranchu
-		 * platform uses physical addresses
+		/* Goldfish TTY for Ranchu platform uses
+		 * physical addresses and DMA for read/write operations
 		 */
 		unsigned long address_end = address + count;
 		while (address < address_end) {
@@ -95,16 +101,23 @@ static inline void goldfish_tty_rw(struct goldfish_tty *qtty,
 			unsigned long next     = page_end < address_end ? page_end
 									: address_end;
 			unsigned long avail    = next - address;
-			unsigned long paddr;
-			struct page *page;
 
-			/*
-			 * We go through a buffer on a page-by-page
-			 * basis in case of potentially huge buffer.
+			/* Map the buffer's virtual address to the DMA address
+			 * so the buffer can be accessed by the device.
 			 */
-			page = virt_to_page((void *)address);
-			paddr = page_to_phys(page) | (address & ~PAGE_MASK);
-			do_rw_io(qtty, paddr, avail, is_write);
+			dma_handle = dma_map_single(qtty->dev, (void *)address, avail, dma_dir);
+
+			if (dma_mapping_error(qtty->dev, dma_handle)) {
+				dev_err(qtty->dev, "tty: DMA mapping error.\n");
+				return;
+			}
+			do_rw_io(qtty, dma_handle, avail, is_write);
+
+			/* Unmap the previously mapped region after the completition
+			 * of the read/write operation.
+			 */
+			dma_unmap_single(qtty->dev, dma_handle, avail, dma_dir);
+
 			address += avail;
 		}
 	} else {
@@ -322,6 +335,7 @@ static int goldfish_tty_probe(struct platform_device *pdev)
 	qtty->port.ops = &goldfish_port_ops;
 	qtty->base = base;
 	qtty->irq = irq;
+	qtty->dev = &pdev->dev;
 
 	/* Goldfish TTY device used by the Goldfish emulator
 	 * should identify itself with 0, forcing the driver
@@ -330,6 +344,20 @@ static int goldfish_tty_probe(struct platform_device *pdev)
 	 * driver will use physical addresses.
 	 */
 	qtty->version = readl(base + GOLDFISH_TTY_VERSION);
+
+	/* Goldfish TTY device on Ranchu emulator (qemu2)
+	 * will use DMA for read/write IO operations.
+	 */
+	if (qtty->version > 0) {
+		/* Initialize dma_mask to 32-bits.
+		 */
+		if (!pdev->dev.dma_mask)
+			pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
+		if (dma_set_mask(&pdev->dev, DMA_BIT_MASK(32))) {
+			dev_err(&pdev->dev, "No suitable DMA available.\n");
+			goto err_create_driver_failed;
+		}
+	}
 
 	writel(GOLDFISH_TTY_CMD_INT_DISABLE, base + GOLDFISH_TTY_CMD);
 
