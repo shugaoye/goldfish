@@ -407,15 +407,11 @@ static ssize_t goldfish_pipe_read_write(struct file *filp, char __user *buffer,
 		while (test_bit(wakeBit, &pipe->flags)) {
 			if (wait_event_interruptible(
 					pipe->wake_queue,
-					!test_bit(wakeBit, &pipe->flags))) {
-				ret = -ERESTARTSYS;
-				break;
-			}
+					!test_bit(wakeBit, &pipe->flags)))
+				return -ERESTARTSYS;
 
-			if (test_bit(BIT_CLOSED_ON_HOST, &pipe->flags)) {
-				ret = -EIO;
-				break;
-			}
+			if (test_bit(BIT_CLOSED_ON_HOST, &pipe->flags))
+				return -EIO;
 		}
 
 		/* Try to re-acquire the lock */
