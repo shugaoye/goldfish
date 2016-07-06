@@ -11,3 +11,9 @@ config MTD_GOLDFISH_NAND
 	help
 	  Drives the emulated NAND flash device on the Google Goldfish
 	  Android virtual device.
+
+config GOLDFISH_RTC
+	tristate "Goldfish RTC Driver"
+	depends on GOLDFISH
+	---help---
+	  Emulated real time clock for the Goldfish Android Virtual Device

@@ -13,14 +13,15 @@
 **
 */
 
-#include <linux/module.h>
+#include <asm/io.h>
+#include <linux/acpi.h>
+#include <linux/export.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/rtc.h>
-#include <linux/export.h>
 #include <linux/slab.h>
-#include <asm/io.h>
 
 enum {
 	TIMER_TIME_LOW          = 0x00, // get low bits of current time and update TIMER_TIME_HIGH
@@ -143,12 +144,19 @@ static const struct of_device_id goldfish_rtc_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, goldfish_rtc_of_match);
 
+static const struct acpi_device_id goldfish_rtc_acpi_match[] = {
+	{ "GFSH0007", 0 },
+	{ },
+};
+MODULE_DEVICE_TABLE(acpi, golfish_rtc_acpi_match);
+
 static struct platform_driver goldfish_rtc = {
 	.probe = goldfish_rtc_probe,
 	.remove = goldfish_rtc_remove,
 	.driver = {
 		.name = "goldfish_rtc",
 		.of_match_table = goldfish_rtc_of_match,
+		.acpi_match_table = ACPI_PTR(goldfish_rtc_acpi_match),
 	}
 };
 
