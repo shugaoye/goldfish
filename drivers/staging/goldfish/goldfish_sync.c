@@ -130,6 +130,9 @@ struct goldfish_sync_state {
 
 	/* Spinlock protects |to_do| / |to_do_end|. */
 	spinlock_t lock;
+	/* |mutex_lock| protects all concurrent access
+	 * to timelines for both kernel and user spage */
+	struct mutex mutex_lock;
 
 	/* Buffer holding commands issued from host. */
 	struct goldfish_sync_hostcmd to_do[GOLDFISH_SYNC_MAX_CMDS];
@@ -242,6 +245,10 @@ static void
 goldfish_sync_timeline_inc(struct goldfish_sync_timeline_obj *obj, uint32_t inc)
 {
 	DTRACE();
+	/* Just give up if someone else nuked the timeline.
+	 * Whoever it was won't care that it doesn't get signaled. */
+	if (!obj || !obj->sw_sync_tl) return;
+
 	DPRINT("timeline_obj=0x%p", obj);
 	sw_sync_timeline_inc(obj->sw_sync_tl, inc);
 	DPRINT("incremented timeline. increment max_time");
@@ -254,6 +261,7 @@ goldfish_sync_timeline_destroy(struct goldfish_sync_timeline_obj *obj)
 {
 	DTRACE();
 	sync_timeline_destroy(&obj->sw_sync_tl->obj);
+	obj->sw_sync_tl = NULL;
 	kfree(obj);
 }
 
@@ -295,10 +303,10 @@ goldfish_sync_hostcmd_reply(struct goldfish_sync_state *sync_state,
 
 	spin_lock_irqsave(&sync_state->lock, irq_flags);
 
-	sync_state->batch_hostcmd->cmd = cmd;
-	sync_state->batch_hostcmd->handle = handle;
-	sync_state->batch_hostcmd->time_arg = time_arg;
-	sync_state->batch_hostcmd->hostcmd_handle = hostcmd_handle;
+	batch_hostcmd->cmd = cmd;
+	batch_hostcmd->handle = handle;
+	batch_hostcmd->time_arg = time_arg;
+	batch_hostcmd->hostcmd_handle = hostcmd_handle;
 	writel(0, sync_state->reg_base + SYNC_REG_BATCH_COMMAND);
 
 	spin_unlock_irqrestore(&sync_state->lock, irq_flags);
@@ -421,6 +429,8 @@ static void goldfish_sync_work_item_fn(struct work_struct *input)
 
 	sync_state = container_of(input, struct goldfish_sync_state, work_item);
 
+	mutex_lock(&sync_state->mutex_lock);
+
 	spin_lock_irqsave(&sync_state->lock, irq_flags); {
 
 		todo_end = sync_state->to_do_end;
@@ -510,6 +520,7 @@ static void goldfish_sync_work_item_fn(struct work_struct *input)
 		}
 		DPRINT("Done executing sync command");
 	}
+	mutex_unlock(&sync_state->mutex_lock);
 }
 
 /* Guest-side interface: file operations */
@@ -533,8 +544,6 @@ static void goldfish_sync_work_item_fn(struct work_struct *input)
  */
 struct goldfish_sync_context {
 	struct goldfish_sync_timeline_obj *timeline;
-	/* This mutex protects |timeline|. */
-	struct mutex mutex_lock;
 };
 
 struct goldfish_sync_ioctl_info {
@@ -550,20 +559,23 @@ static int goldfish_sync_open(struct inode *inode, struct file *file)
 
 	DTRACE();
 
+	mutex_lock(&global_sync_state->mutex_lock);
+
 	sync_context = kzalloc(sizeof(struct goldfish_sync_context), GFP_KERNEL);
 
 	if (sync_context == NULL) {
 		ERR("Creation of goldfish sync context failed!");
+		mutex_unlock(&global_sync_state->mutex_lock);
 		return -ENOMEM;
 	}
 
 	sync_context->timeline = NULL;
 
-	mutex_init(&sync_context->mutex_lock);
-
 	file->private_data = sync_context;
 
 	DPRINT("successfully create a sync context @0x%p", sync_context);
+
+	mutex_unlock(&global_sync_state->mutex_lock);
 
 	return 0;
 }
@@ -575,14 +587,18 @@ static int goldfish_sync_release(struct inode *inode, struct file *file)
 
 	DTRACE();
 
+	mutex_lock(&global_sync_state->mutex_lock);
+
 	sync_context = file->private_data;
 
 	if (sync_context->timeline)
 		goldfish_sync_timeline_destroy(sync_context->timeline);
 
-	mutex_destroy(&sync_context->mutex_lock);
+	sync_context->timeline = NULL;
 
 	kfree(sync_context);
+
+	mutex_unlock(&global_sync_state->mutex_lock);
 
 	return 0;
 }
@@ -611,19 +627,19 @@ static long goldfish_sync_ioctl(struct file *file,
 
 		DPRINT("exec GOLDFISH_SYNC_IOC_QUEUE_WORK");
 
-		mutex_lock(&sync_context_data->mutex_lock);
+		mutex_lock(&global_sync_state->mutex_lock);
 
 		if (copy_from_user(&ioctl_data,
 						(void __user *)arg,
 						sizeof(ioctl_data))) {
 			ERR("Failed to copy memory for ioctl_data from user.");
-			mutex_unlock(&sync_context_data->mutex_lock);
+			mutex_unlock(&global_sync_state->mutex_lock);
 			return -EFAULT;
 		}
 
 		if (ioctl_data.host_syncthread_handle_in == 0) {
 			DPRINT("Error: zero host syncthread handle!!!");
-			mutex_unlock(&sync_context_data->mutex_lock);
+			mutex_unlock(&global_sync_state->mutex_lock);
 			return -EFAULT;
 		}
 
@@ -649,7 +665,7 @@ static long goldfish_sync_ioctl(struct file *file,
 			DPRINT("Error, could not copy to user!!!");
 
 			sys_close(fd_out);
-			mutex_unlock(&sync_context_data->mutex_lock);
+			mutex_unlock(&global_sync_state->mutex_lock);
 			return -EFAULT;
 		}
 
@@ -659,7 +675,7 @@ static long goldfish_sync_ioctl(struct file *file,
 				ioctl_data.host_syncthread_handle_in,
 				(uint64_t)(uintptr_t)(sync_context_data->timeline));
 
-		mutex_unlock(&sync_context_data->mutex_lock);
+		mutex_unlock(&global_sync_state->mutex_lock);
 		return 0;
 	default:
 		return -ENOTTY;
@@ -726,6 +742,8 @@ int goldfish_sync_probe(struct platform_device *pdev)
 	sync_state->to_do_end = 0;
 
 	spin_lock_init(&sync_state->lock);
+	mutex_init(&sync_state->mutex_lock);
+
 	platform_set_drvdata(pdev, sync_state);
 
 	ioresource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
