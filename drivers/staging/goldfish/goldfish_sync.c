@@ -21,6 +21,7 @@
 #include <linux/platform_device.h>
 
 #include <linux/interrupt.h>
+#include <linux/kref.h>
 #include <linux/spinlock.h>
 #include <linux/types.h>
 
@@ -131,7 +132,7 @@ struct goldfish_sync_state {
 	/* Spinlock protects |to_do| / |to_do_end|. */
 	spinlock_t lock;
 	/* |mutex_lock| protects all concurrent access
-	 * to timelines for both kernel and user spage */
+	 * to timelines for both kernel and user space. */
 	struct mutex mutex_lock;
 
 	/* Buffer holding commands issued from host. */
@@ -158,7 +159,76 @@ static struct goldfish_sync_state global_sync_state[1];
 struct goldfish_sync_timeline_obj {
 	struct sw_sync_timeline *sw_sync_tl;
 	uint32_t current_time;
+	/* We need to be careful about when we deallocate
+	 * this |goldfish_sync_timeline_obj| struct.
+	 * In order to ensure proper cleanup, we need to
+	 * consider the triggered host-side wait that may
+	 * still be in flight when the guest close()'s a
+	 * goldfish_sync device's sync context fd (and
+	 * destroys the |sw_sync_tl| field above).
+	 * The host-side wait may raise IRQ
+	 * and tell the kernel to increment the timeline _after_
+	 * the |sw_sync_tl| has already been set to null.
+	 *
+	 * From observations on OpenGL apps and CTS tests, this
+	 * happens at some very low probability upon context
+	 * destruction or process close, but it does happen
+	 * and it needs to be handled properly. Otherwise,
+	 * if we clean up the surrounding |goldfish_sync_timeline_obj|
+	 * too early, any |handle| field of any host->guest command
+	 * might not even point to a null |sw_sync_tl| field,
+	 * but to garbage memory or even a reclaimed |sw_sync_tl|.
+	 * If we do not count such "pending waits" and kfree the object
+	 * immediately upon |goldfish_sync_timeline_destroy|,
+	 * we might get mysterous RCU stalls after running a long
+	 * time because the garbage memory that is being read
+	 * happens to be interpretable as a |spinlock_t| struct
+	 * that is currently in the locked state.
+	 *
+	 * To track when to free the |goldfish_sync_timeline_obj|
+	 * itself, we maintain a kref.
+	 * The kref essentially counts the timeline itself plus
+	 * the number of waits in flight. kref_init/kref_put
+	 * are issued on
+	 * |goldfish_sync_timeline_create|/|goldfish_sync_timeline_destroy|
+	 * and kref_get/kref_put are issued on
+	 * |goldfish_sync_fence_create|/|goldfish_sync_timeline_inc|.
+	 *
+	 * The timeline is destroyed after reference count
+	 * reaches zero, which would happen after
+	 * |goldfish_sync_timeline_destroy| and all pending
+	 * |goldfish_sync_timeline_inc|'s are fulfilled.
+	 *
+	 * NOTE (1): We assume that |fence_create| and
+	 * |timeline_inc| calls are 1:1, otherwise the kref scheme
+	 * will not work. This is a valid assumption as long
+	 * as the host-side virtual device implementation
+	 * does not insert any timeline increments
+	 * that we did not trigger from here.
+	 *
+	 * NOTE (2): The use of kref by itself requires no locks,
+	 * but this does not mean everything works without locks.
+	 * Related timeline operations do require a lock of some sort,
+	 * or at least are not proven to work without it.
+	 * In particualr, we assume that all the operations
+	 * done on the |kref| field above are done in contexts where
+	 * |global_sync_state->mutex_lock| is held. Do not
+	 * remove that lock until everything is proven to work
+	 * without it!!! */
+	struct kref kref;
 };
+
+/* We will call |delete_timeline_obj| when the last reference count
+ * of the kref is decremented. This deletes the sw_sync
+ * timeline object along with the wrapper itself. */
+static void delete_timeline_obj(struct kref* kref) {
+	struct goldfish_sync_timeline_obj* obj =
+		container_of(kref, struct goldfish_sync_timeline_obj, kref);
+
+	sync_timeline_destroy(&obj->sw_sync_tl->obj);
+	obj->sw_sync_tl = NULL;
+	kfree(obj);
+}
 
 static uint64_t gensym_ctr;
 static void gensym(char *dst)
@@ -167,6 +237,8 @@ static void gensym(char *dst)
 	gensym_ctr++;
 }
 
+/* |goldfish_sync_timeline_create| assumes that |global_sync_state->mutex_lock|
+ * is held. */
 static struct goldfish_sync_timeline_obj*
 goldfish_sync_timeline_create(void)
 {
@@ -188,21 +260,30 @@ goldfish_sync_timeline_create(void)
 	res = kzalloc(sizeof(struct goldfish_sync_timeline_obj), GFP_KERNEL);
 	res->sw_sync_tl = res_sync_tl;
 	res->current_time = 0;
+	kref_init(&res->kref);
 
 	DPRINT("new timeline_obj=0x%p", res);
 	return res;
 }
 
+/* |goldfish_sync_fence_create| assumes that |global_sync_state->mutex_lock|
+ * is held. */
 static int
-goldfish_sync_fence_create(struct sw_sync_timeline *tl, uint32_t val)
+goldfish_sync_fence_create(struct goldfish_sync_timeline_obj *obj,
+							uint32_t val)
 {
 
 	int fd;
 	char fence_name[256];
 	struct sync_pt *syncpt = NULL;
 	struct sync_fence *sync_obj = NULL;
+	struct sw_sync_timeline *tl;
 
 	DTRACE();
+
+	if (!obj) return -1;
+
+	tl = obj->sw_sync_tl;
 
 	syncpt = sw_sync_pt_create(tl, val);
 	if (!syncpt) {
@@ -231,6 +312,7 @@ goldfish_sync_fence_create(struct sw_sync_timeline *tl, uint32_t val)
 
 	DPRINT("installing sync fence into fd %d sync_obj=0x%p", fd, sync_obj);
 	sync_fence_install(sync_obj, fd);
+	kref_get(&obj->kref);
 
 	return fd;
 
@@ -241,28 +323,37 @@ err_cleanup_pt:
 	return -1;
 }
 
+/* |goldfish_sync_timeline_inc| assumes that |global_sync_state->mutex_lock|
+ * is held. */
 static void
 goldfish_sync_timeline_inc(struct goldfish_sync_timeline_obj *obj, uint32_t inc)
 {
 	DTRACE();
 	/* Just give up if someone else nuked the timeline.
 	 * Whoever it was won't care that it doesn't get signaled. */
-	if (!obj || !obj->sw_sync_tl) return;
+	if (!obj) return;
 
 	DPRINT("timeline_obj=0x%p", obj);
 	sw_sync_timeline_inc(obj->sw_sync_tl, inc);
 	DPRINT("incremented timeline. increment max_time");
 	obj->current_time += inc;
+
+	/* Here, we will end up deleting the timeline object if it
+	 * turns out that this call was a pending increment after
+	 * |goldfish_sync_timeline_destroy| was called. */
+	kref_put(&obj->kref, delete_timeline_obj);
 	DPRINT("done");
 }
 
+/* |goldfish_sync_timeline_destroy| assumes
+ * that |global_sync_state->mutex_lock| is held. */
 static void
 goldfish_sync_timeline_destroy(struct goldfish_sync_timeline_obj *obj)
 {
 	DTRACE();
-	sync_timeline_destroy(&obj->sw_sync_tl->obj);
-	obj->sw_sync_tl = NULL;
-	kfree(obj);
+	/* See description of |goldfish_sync_timeline_obj| for why we
+	 * should not immediately destroy |obj| */
+	kref_put(&obj->kref, delete_timeline_obj);
 }
 
 static inline void
@@ -498,8 +589,7 @@ static void goldfish_sync_work_item_fn(struct work_struct *input)
 			DPRINT("exec CMD_CREATE_SYNC_FENCE: "
 					"handle=0x%llx time_arg=%d",
 					handle, time_arg);
-			sync_fence_fd = goldfish_sync_fence_create(timeline->sw_sync_tl,
-													time_arg);
+			sync_fence_fd = goldfish_sync_fence_create(timeline, time_arg);
 			goldfish_sync_hostcmd_reply(sync_state, CMD_CREATE_SYNC_FENCE,
 										sync_fence_fd,
 										0,
@@ -650,7 +740,7 @@ static long goldfish_sync_ioctl(struct file *file,
 		}
 
 		timeline = sync_context_data->timeline;
-		fd_out = goldfish_sync_fence_create(timeline->sw_sync_tl,
+		fd_out = goldfish_sync_fence_create(timeline,
 											timeline->current_time + 1);
 		DPRINT("Created fence with fd %d and current time %u (timeline: 0x%p)",
 			   fd_out,
@@ -665,10 +755,14 @@ static long goldfish_sync_ioctl(struct file *file,
 			DPRINT("Error, could not copy to user!!!");
 
 			sys_close(fd_out);
+			/* We won't be doing an increment, kref_put immediately. */
+			kref_put(&timeline->kref, delete_timeline_obj);
 			mutex_unlock(&global_sync_state->mutex_lock);
 			return -EFAULT;
 		}
 
+		/* We are now about to trigger a host-side wait;
+		 * accumulate on |pending_waits|. */
 		goldfish_sync_send_guestcmd(global_sync_state,
 				CMD_TRIGGER_HOST_WAIT,
 				ioctl_data.host_glsync_handle_in,
@@ -876,7 +970,7 @@ void test_kernel_sync(void)
 	test_timeline = goldfish_sync_timeline_create();
 	DPRINT("sw_sync_timeline_create -> 0x%p", test_timeline);
 
-	test_fence_fd = goldfish_sync_fence_create(test_timeline->sw_sync_tl, 1);
+	test_fence_fd = goldfish_sync_fence_create(test_timeline, 1);
 	DPRINT("sync_fence_create -> %d", test_fence_fd);
 
 	DPRINT("incrementing test timeline");
