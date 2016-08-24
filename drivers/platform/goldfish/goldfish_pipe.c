@@ -315,7 +315,7 @@ static ssize_t goldfish_pipe_read_write(struct file *filp, char __user *buffer,
 		unsigned long page_end = (address & PAGE_MASK) + PAGE_SIZE;
 		unsigned long next, avail;
 		int status, wakeBit, page_i, num_contiguous_pages;
-		int first_page, last_page, requested_pages;
+		long first_page, last_page, requested_pages;
 		unsigned long xaddr, xaddr_prev, xaddr_i;
 
 		/*
@@ -323,7 +323,7 @@ static ssize_t goldfish_pipe_read_write(struct file *filp, char __user *buffer,
 		 */
 		first_page = address & PAGE_MASK;
 		last_page = (address_end - 1) & PAGE_MASK;
-		requested_pages = (last_page - first_page + 1);
+		requested_pages = ((last_page - first_page) >> PAGE_SHIFT) + 1;
 		if (requested_pages > MAX_PAGES_TO_GRAB) {
 			requested_pages = MAX_PAGES_TO_GRAB;
 		}
