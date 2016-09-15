@@ -84,6 +84,7 @@
 #define SYNC_REG_BATCH_COMMAND_ADDR_HIGH      0x0c /* 64-bit part */
 #define SYNC_REG_BATCH_GUESTCOMMAND_ADDR      0x10 /* communicate physical address of guest->host commands */
 #define SYNC_REG_BATCH_GUESTCOMMAND_ADDR_HIGH 0x14 /* 64-bit part */
+#define SYNC_REG_INIT                         0x18 /* signals that the device has been probed */
 
 /* There is an ioctl associated with goldfish sync driver.
  * Make it conflict with ioctls that are not likely to be used
@@ -905,6 +906,8 @@ int goldfish_sync_probe(struct platform_device *pdev)
 	}
 
 	INFO("goldfish_sync: Initialized goldfish sync device");
+
+	writel(0, sync_state->reg_base + SYNC_REG_INIT);
 
 	return 0;
 }
