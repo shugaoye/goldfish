@@ -69,6 +69,21 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 		if (get_user(addrOthers, (u32 __user * __user *) (unsigned long) addr) != 0)
 			break;
 
+		if (task_thread_info(child)->vdso_page) {
+			if (((child->mm->context.vdso - sizeof(tmp)) <
+			      (void __user*)addrOthers) &&
+			    ((child->mm->context.vdso + PAGE_SIZE) >
+			     (void __user*)addrOthers)) {
+				if ((child->mm->context.vdso + PAGE_SIZE -
+				     (void __user*)addrOthers) < sizeof(tmp)) {
+					ret = -EIO;
+					break;
+				}
+				ret = mips_vdso_ptrace_get(child, (u64)addrOthers,
+					(unsigned long) data, sizeof(tmp));
+				break;
+			}
+		}
 		copied = access_process_vm(child, (u64)addrOthers, &tmp,
 				sizeof(tmp), 0);
 		if (copied != sizeof(tmp))
@@ -179,6 +194,11 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 		ret = -EIO;
 		if (get_user(addrOthers, (u32 __user * __user *) (unsigned long) addr) != 0)
 			break;
+		if (task_thread_info(child)->vdso_page) {
+			if (((child->mm->context.vdso - sizeof(data)) < (void __user*)addrOthers) &&
+			    ((child->mm->context.vdso + PAGE_SIZE) > (void __user*)addrOthers))
+				break;
+		}
 		ret = 0;
 		if (access_process_vm(child, (u64)addrOthers, &data,
 					sizeof(data), 1) == sizeof(data))
@@ -292,6 +312,39 @@ long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 		break;
 
 	default:
+		switch (request) {
+			case PTRACE_PEEKTEXT:
+			case PTRACE_PEEKDATA: {
+				void __user *addrp = (void __user *)(unsigned long)(compat_ulong_t)addr;
+				compat_ulong_t __user *datap = compat_ptr((compat_ulong_t)data);
+				if (task_thread_info(child)->vdso_page) {
+					if ((child->mm->context.vdso <= addrp) &&
+					    ((child->mm->context.vdso + PAGE_SIZE) > addrp)) {
+						if ((child->mm->context.vdso + PAGE_SIZE -
+						     addrp) < sizeof(unsigned long)) {
+							ret = -EIO;
+							goto out;
+						}
+						ret = mips_vdso_ptrace_get(child, (unsigned long)addrp,
+							(unsigned long)datap, sizeof(data));
+						goto out;
+					}
+				}
+				break;
+			}
+			case PTRACE_POKETEXT:
+			case PTRACE_POKEDATA: {
+				void __user *addrp = (void __user *)(unsigned long)(compat_ulong_t)addr;
+				if (task_thread_info(child)->vdso_page) {
+					if (((child->mm->context.vdso - sizeof(data)) < addrp) &&
+					    ((child->mm->context.vdso + PAGE_SIZE) > addrp)) {
+						ret = -EIO;
+						goto out;
+					}
+				}
+				break;
+			}
+		}
 		ret = compat_ptrace_request(child, request, addr, data);
 		break;
 	}

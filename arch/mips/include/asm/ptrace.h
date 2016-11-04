@@ -61,6 +61,9 @@ extern int ptrace_get_watch_regs(struct task_struct *child,
 extern int ptrace_set_watch_regs(struct task_struct *child,
 	struct pt_watch_regs __user *addr);
 
+int mips_vdso_ptrace_get(struct task_struct *child, unsigned long addr,
+			 unsigned long data, int size);
+
 /*
  * Does the process account for user or for system time?
  */
