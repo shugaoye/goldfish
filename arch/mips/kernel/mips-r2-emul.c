@@ -690,7 +690,7 @@ static inline int mipsr2_find_ex(struct pt_regs *regs, u32 inst, struct r2_decod
 
 int mipsr2_decoder(struct pt_regs *regs, u32 instruction)
 {
-	int err = 0;
+	int err;
 	unsigned long vaddr;
 	u32 inst = instruction;
 	u32 nir;
@@ -707,9 +707,9 @@ int mipsr2_decoder(struct pt_regs *regs, u32 instruction)
 repeat:
 	r31 = regs->regs[31];
 	epc = regs->cp0_epc;
-	err = compute_return_epc(regs);
-	if (err < 0)
+	if (compute_return_epc(regs) < 0)
 		return(SIGEMT);
+	err = 0;
 
 	switch (MIPSInst_OPCODE(inst)) {
 
@@ -870,10 +870,15 @@ repeat:
 		}
 		break;
 
-	case beql_op:
-	case bnel_op:
 	case blezl_op:
 	case bgtzl_op:
+		/* return MIPS R6 instruction to CPU execution */
+		if (MIPSInst_RT(inst)) {
+			err = SIGILL;
+			break;
+		}
+	case beql_op:
+	case bnel_op:
 		if (delay_slot(regs)) {
 			err = SIGILL;
 			break;
