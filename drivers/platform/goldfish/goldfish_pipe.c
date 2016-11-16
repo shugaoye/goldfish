@@ -124,7 +124,7 @@ enum PipeCmdCode {
 };
 
 enum {
-	MAX_BUFFERS_PER_COMMAND = 160,
+	MAX_BUFFERS_PER_COMMAND = 336,
 	MAX_SIGNALLED_PIPES = 64,
 	INITIAL_PIPES_CAPACITY = 64
 };
@@ -142,10 +142,10 @@ struct goldfish_pipe_command {
 	union {
 		/* Parameters for PIPE_CMD_{READ,WRITE} */
 		struct {
-			u64 ptrs[MAX_BUFFERS_PER_COMMAND]; 	/* buffer pointers, guest -> host */
-			u32 sizes[MAX_BUFFERS_PER_COMMAND];	/* buffer sizes, guest -> host */
 			u32 buffers_count;					/* number of buffers, guest -> host */
 			s32 consumed_size;					/* number of consumed bytes, host -> guest */
+			u64 ptrs[MAX_BUFFERS_PER_COMMAND]; 	/* buffer pointers, guest -> host */
+			u32 sizes[MAX_BUFFERS_PER_COMMAND];	/* buffer sizes, guest -> host */
 		} rw_params;
 	};
 };
@@ -159,6 +159,7 @@ struct signalled_pipe_buffer {
 /* Parameters for the PIPE_CMD_OPEN command */
 struct open_command_param {
 	u64 command_buffer_ptr;
+	u32 rw_params_max_count;
 };
 
 /* Device-level set of buffers shared with the host */
@@ -303,7 +304,42 @@ static void populate_rw_params(
 	command->rw_params.buffers_count = buffer_idx + 1;
 }
 
-static int wait_for_host_signal_locked(struct goldfish_pipe *pipe, int is_write)
+static int transfer_max_buffers(struct goldfish_pipe* pipe,
+	unsigned long address, unsigned long address_end, int is_write,
+	unsigned long last_page, unsigned int last_page_size,
+	s32* consumed_size, int* status)
+{
+	struct page *pages[MAX_BUFFERS_PER_COMMAND];
+	unsigned long first_page = address & PAGE_MASK;
+	unsigned int iter_last_page_size;
+	int pages_count = pin_user_pages(first_page, last_page,
+			last_page_size, is_write,
+			pages, &iter_last_page_size);
+	if (pages_count < 0)
+		return pages_count;
+
+	/* Serialize access to the pipe command buffers */
+	if (mutex_lock_interruptible(&pipe->lock))
+		return -ERESTARTSYS;
+
+	populate_rw_params(pages, pages_count, address, address_end,
+		first_page, last_page, iter_last_page_size, is_write,
+		pipe->command_buffer);
+
+	/* Transfer the data */
+	*status = goldfish_cmd_locked(pipe,
+						is_write ? PIPE_CMD_WRITE : PIPE_CMD_READ);
+
+	*consumed_size = pipe->command_buffer->rw_params.consumed_size;
+
+	mutex_unlock(&pipe->lock);
+
+	release_user_pages(pages, pages_count, is_write, *consumed_size);
+
+	return 0;
+}
+
+static int wait_for_host_signal(struct goldfish_pipe *pipe, int is_write)
 {
 	u32 wakeBit = is_write ? BIT_WAKE_ON_WRITE : BIT_WAKE_ON_READ;
 	set_bit(wakeBit, &pipe->flags);
@@ -350,34 +386,12 @@ static ssize_t goldfish_pipe_read_write(struct file *filp,
 	last_page_size = ((address_end - 1) & ~PAGE_MASK) + 1;
 
 	while (address < address_end) {
-		int status;
-		struct page *pages[MAX_BUFFERS_PER_COMMAND];
-		unsigned long first_page = address & PAGE_MASK;
-		unsigned int iter_last_page_size;
 		s32 consumed_size;
-		ret = pin_user_pages(first_page, last_page,
-				last_page_size, is_write,
-				pages, &iter_last_page_size);
+		int status;
+		ret = transfer_max_buffers(pipe, address, address_end, is_write,
+				last_page, last_page_size, &consumed_size, &status);
 		if (ret < 0)
 			break;
-
-		/* Serialize access to the pipe command buffers */
-		if (mutex_lock_interruptible(&pipe->lock))
-			return -ERESTARTSYS;
-
-		populate_rw_params(pages, ret, address, address_end,
-			first_page, last_page, iter_last_page_size, is_write,
-			pipe->command_buffer);
-
-		/* Transfer the data */
-		status = goldfish_cmd_locked(pipe,
-							is_write ? PIPE_CMD_WRITE : PIPE_CMD_READ);
-
-		consumed_size = pipe->command_buffer->rw_params.consumed_size;
-
-		mutex_unlock(&pipe->lock);
-
-		release_user_pages(pages, ret, is_write, consumed_size);
 
 		if (consumed_size > 0) {
 			/* No matter what's the status, we've transfered something */
@@ -413,7 +427,7 @@ static ssize_t goldfish_pipe_read_write(struct file *filp,
 			break;
 		}
 
-		status = wait_for_host_signal_locked(pipe, is_write);
+		status = wait_for_host_signal(pipe, is_write);
 		if (status < 0)
 			return status;
 	}
@@ -665,6 +679,8 @@ static int goldfish_pipe_open(struct inode *inode, struct file *file)
 	pipe->command_buffer->id = id;
 
 	/* Now tell the emulator we're opening a new pipe. */
+	dev->buffers->open_command_params.rw_params_max_count =
+			MAX_BUFFERS_PER_COMMAND;
 	dev->buffers->open_command_params.command_buffer_ptr =
 			(u64)(unsigned long)__pa(pipe->command_buffer);
 	status = goldfish_cmd_locked(pipe, PIPE_CMD_OPEN);
@@ -784,6 +800,8 @@ static int goldfish_pipe_probe(struct platform_device *pdev)
 	int err;
 	struct resource *r;
 	struct goldfish_pipe_dev *dev = pipe_dev;
+
+	BUG_ON(sizeof(struct goldfish_pipe_command) > PAGE_SIZE);
 
 	/* not thread safe, but this should not happen */
 	WARN_ON(dev->base != NULL);
