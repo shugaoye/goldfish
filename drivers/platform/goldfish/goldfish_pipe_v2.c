@@ -52,9 +52,10 @@
 /*
  * Update this when something changes in the driver's behavior so the host
  * can benefit from knowing it
+ * Note: version 2 was an intermediate release and isn't supported anymore.
  */
 enum {
-	PIPE_DRIVER_VERSION = 2,
+	PIPE_DRIVER_VERSION = 3,
 	PIPE_CURRENT_DEVICE_VERSION = 2
 };
 
